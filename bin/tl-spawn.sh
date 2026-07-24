@@ -4,11 +4,12 @@ set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"
 . "$BIN/tl-common.sh"; . "$BIN/tl-worktree.sh"; . "$BIN/tl-session.sh"
 
-id=""; project=""; kind=""; brief=""
+id=""; project=""; kind=""; brief=""; pname=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --id) id="$2"; shift 2;;
     --project) project="$2"; shift 2;;
+    --project-name) pname="$2"; shift 2;;
     --kind) kind="$2"; shift 2;;
     --brief) brief="$2"; shift 2;;
     *) tl_die "unknown arg: $1";;
@@ -20,6 +21,7 @@ case "$kind" in plan|change) ;; *) tl_die "kind must be plan or change in Phase 
 : "${TL_WORKER_CMD:?tl: no worker configured — set TL_WORKER_CMD to the harness adapter}"
 
 project="$(cd "$project" && pwd -P)"
+pname="${pname:-$(basename "$project")}"   # registry key for the change gate (§3.12)
 wt="$(tl_worktree_acquire "$project" "$id")"
 wt="$(cd "$wt" && pwd -P)"   # canonicalize: git resolves symlinks (macOS /var -> /private/var)
 # §3.9: spawn refuses unless the resolved path is a real worktree root distinct from the primary checkout.
@@ -33,6 +35,7 @@ mkdir -p "$TL_DATA/$id"
 report="$TL_DATA/$id/report.md"
 
 tl_meta_set "$id" project  "$project"
+tl_meta_set "$id" pname    "$pname"
 tl_meta_set "$id" worktree "$wt"
 tl_meta_set "$id" branch   "tl/$id"
 tl_meta_set "$id" base     "$base"

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# tl-baseline.sh — capture a project's known-failing test set (§2.7, §3.12). Without it a brownfield
+# change has no completion criterion: workers compare against this baseline, not against green.
+# The test command must print failing-test identifiers, one per line (a project adapter's job).
+# tl: `eval` on operator-configured command — trusted registry only, never worker input
+set -eu
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+name="${1:?usage: tl-baseline NAME}"
+path="$("$BIN/tl-project.sh" get "$name" path)"         || tl_die "unknown project: $name"
+cmd="$("$BIN/tl-project.sh" get "$name" test_command)"  || tl_die "no test_command for $name"
+out="$TL_DATA/projects/$name.baseline"
+
+echo "tl: capturing baseline for $name  ($cmd)"
+( cd "$path" && eval "$cmd" ) 2>/dev/null | sort -u > "$out" || true
+"$BIN/tl-project.sh" set "$name" baseline "$out"
+"$BIN/tl-project.sh" set "$name" baseline_at "$(date -u +%Y-%m-%d)"
+echo "tl: baseline recorded — $(grep -c . "$out" 2>/dev/null || echo 0) known-failing test(s)"

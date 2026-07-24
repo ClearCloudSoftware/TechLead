@@ -20,4 +20,5 @@ echo "worker: wrote $TL_REPORT"
 # a real adapter records actual usage; the demo records a synthetic figure so the cost
 # ledger plumbing (E1.4) is exercised without spending tokens.
 "$TL_HOME/bin/tl-cost.sh" record "$TL_TASK_ID" worker 1000 200 0 || true
+"$TL_HOME/bin/tl-status.sh" "$TL_TASK_ID" done || true   # wake-worthy transition (§3.7)
 echo "worker: done"

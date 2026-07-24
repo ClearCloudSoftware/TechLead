@@ -24,11 +24,12 @@ $brief"
 
 echo "worker: launching claude ($kind) for $TL_TASK_ID"
 out="$(claude -p "$prompt" --output-format json --permission-mode "$mode" --max-turns 20)" \
-  || { echo "worker: claude invocation failed" >&2; exit 1; }
+  || { echo "worker: claude invocation failed" >&2; "$TL_HOME/bin/tl-status.sh" "$TL_TASK_ID" failed "claude invocation failed" || true; exit 1; }
 
 if [ "$(printf '%s' "$out" | jq -r '.is_error')" = "true" ]; then
   echo "worker: claude reported an error" >&2
   printf '%s' "$out" | jq -r '.result // "(no result)"' >&2
+  "$TL_HOME/bin/tl-status.sh" "$TL_TASK_ID" failed "claude reported an error" || true
   exit 1
 fi
 
@@ -40,5 +41,6 @@ in_="$(printf '%s' "$out" | jq '((.usage.input_tokens//0)+(.usage.cache_read_inp
 out_="$(printf '%s' "$out" | jq '(.usage.output_tokens//0)')"
 cost="$(printf '%s' "$out" | jq '(.total_cost_usd//0)')"
 "$TL_HOME/bin/tl-cost.sh" record "$TL_TASK_ID" worker "$in_" "$out_" "$cost" || true
+"$TL_HOME/bin/tl-status.sh" "$TL_TASK_ID" done || true   # wake-worthy transition (§3.7)
 
 echo "worker: done ($TL_TASK_ID) — in=$in_ out=$out_ cost=$cost"

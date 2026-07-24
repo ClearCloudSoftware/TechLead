@@ -34,3 +34,12 @@ tl_meta_set() { # id key value  (rewrite so last value wins on read — not an e
   { [ -f "$f" ] && grep -v "^$2=" "$f" || true; printf '%s=%s\n' "$2" "$3"; } > "$tmp"
   mv "$tmp" "$f"
 }
+
+tl_now() { date +%s; }
+tl_mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }   # tl: macOS BSD stat — `stat -c %Y` on GNU
+
+# APPEND-ONLY event log (§3.4). Workers append only wake-worthy transitions; nothing on silent
+# resume. tl_status_last returns the last *event's* verb — a hint for tl-state to reconcile, NOT
+# the current state. Read current state through bin/tl-state.sh, never this tail.
+tl_status_file() { printf '%s/%s.status' "$TL_STATE" "$1"; }
+tl_status_last() { tail -n 1 "$(tl_status_file "$1")" 2>/dev/null | awk -F'\t' '{print $2}'; }

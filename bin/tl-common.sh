@@ -18,6 +18,7 @@ TL_DATA="${TL_DATA:-$TL_HOME/data}"
 TL_STATE="${TL_STATE:-$TL_HOME/state}"
 TL_WORKTREES="${TL_WORKTREES:-$TL_STATE/wt}"
 mkdir -p "$TL_DATA" "$TL_STATE" "$TL_WORKTREES"
+export TL_HOME TL_DATA TL_STATE TL_WORKTREES   # so a spawned worker inherits its instance
 
 tl_log() { printf 'tl: %s\n' "$*" >&2; }
 tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }

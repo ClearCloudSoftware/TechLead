@@ -13,8 +13,9 @@ fail() { echo "FAIL: $1"; exit 1; }
 PROJ="$(mktemp -d)"; git -C "$PROJ" init -q
 git -C "$PROJ" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 # temp instance home (isolates data/ state/ from the real repo) with the TL_HOME marker
-HOME_="$(mktemp -d)"; cp "$REPO/AGENTS.md" "$HOME_/AGENTS.md"
-export TL_HOME="$HOME_"
+HOME_="$(mktemp -d)"
+export TL_HOME="$REPO"                                  # real instance: has bin/ and AGENTS.md
+export TL_DATA="$HOME_/data" TL_STATE="$HOME_/state" TL_WORKTREES="$HOME_/state/wt"
 export TL_WORKER_CMD="$REPO/test/demo-worker.sh"
 cleanup() { rm -rf "$PROJ" "$HOME_"; }
 trap cleanup EXIT
@@ -42,6 +43,10 @@ echo "== assertions =="
 [ -f "$HOME_/data/$ID/report.md" ] || fail "report did not survive teardown"
 [ ! -e "$HOME_/state/wt/$ID" ] || fail "worktree dir not removed"
 git -C "$PROJ" worktree list | grep -q "wt/$ID" && fail "worktree still registered in git" || true
+[ -f "$HOME_/data/costs.tsv" ] || fail "no cost ledger (E1.4)"
+awk -F'\t' -v id="$ID" '$2==id{f=1} END{exit !f}' "$HOME_/data/costs.tsv" || fail "cost not recorded for $ID"
+[ -f "$HOME_/data/metrics.tsv" ] || fail "no metric ledger (E1.5)"
+awk -F'\t' -v id="$ID" '$2==id && $3=="approve"{f=1} END{exit !f}' "$HOME_/data/metrics.tsv" || fail "approval time not recorded for $ID"
 
 echo "== guard: teardown refuses undelivered work =="
 G="smoke-2"
@@ -54,4 +59,8 @@ echo "  refused as expected; forcing cleanup"
 "$BIN/tl-teardown.sh" "$G" --force >/dev/null
 [ ! -e "$HOME_/state/wt/$G" ] || fail "forced teardown left the worktree behind"
 
-echo "PASS: dispatch → worktree → report → approve → teardown, and the guard refuses undelivered work"
+echo "== ledgers =="
+"$BIN/tl-cost.sh" report | sed 's/^/  /'
+"$BIN/tl-metric.sh" report | sed 's/^/  /'
+
+echo "PASS: dispatch → worktree → report → approve → teardown; guard refuses undelivered work; cost + metric recorded"

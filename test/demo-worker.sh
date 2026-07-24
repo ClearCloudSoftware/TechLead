@@ -17,4 +17,7 @@ mkdir -p "$(dirname "$TL_REPORT")"
   echo "- Wrote this report to \`data/$TL_TASK_ID/report.md\` — it survives teardown."
 } > "$TL_REPORT"
 echo "worker: wrote $TL_REPORT"
+# a real adapter records actual usage; the demo records a synthetic figure so the cost
+# ledger plumbing (E1.4) is exercised without spending tokens.
+"$TL_HOME/bin/tl-cost.sh" record "$TL_TASK_ID" worker 1000 200 0 || true
 echo "worker: done"

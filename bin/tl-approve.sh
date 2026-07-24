@@ -11,6 +11,7 @@ echo "── report for $id ─────────────────�
 cat "$report"
 echo "───────────────────────────────────────────────────────────"
 
+t0="$(date +%s)"
 if [ "${TL_APPROVE:-}" = "yes" ]; then
   ans="approve"
 else
@@ -18,5 +19,7 @@ else
   read -r ans || ans="approve"
   ans="${ans:-approve}"
 fi
+t1="$(date +%s)"
 tl_meta_set "$id" approval "$ans"
+"$BIN/tl-metric.sh" record "$id" approve "$((t1 - t0))" || true   # D13 input (E1.5)
 tl_log "task $id: $ans"

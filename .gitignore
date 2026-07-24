@@ -1,0 +1,4 @@
+# volatile / durable-private runtime — reconstructible or local-only (§3.2)
+/data/
+/state/
+/config/

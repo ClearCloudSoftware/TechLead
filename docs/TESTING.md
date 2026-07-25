@@ -87,23 +87,40 @@ Every smoke:
 
 Nothing is left behind and no network or real agent is involved.
 
-## Testing against a real agent (optional, spends tokens)
+## Testing against a real agent (optional)
 
-To exercise the *real* Claude Code path end to end (as done during development):
+To exercise a *real* agent end to end, as done during development. Two harnesses are wired; pick one:
+
+**Claude Code** — spends tokens (~**$0.40** for a tiny change, dominated by Claude Code's fixed
+per-invocation context, not the task). Needs `claude` installed and authenticated.
 
 ```sh
 export TL_HOME="$PWD"
 export TL_WORKER_CMD="$TL_HOME/adapters/claude-worker.sh"
 export TL_GRILL_CMD="$TL_HOME/adapters/claude-grill.sh"
-# register + baseline a small throwaway project, add a backlog item, then:
+```
+
+**opencode** — free with a **local** model (slower). Needs a **tools-capable** model.
+
+```sh
+export TL_HOME="$PWD"
+export TL_WORKER_CMD="$TL_HOME/adapters/opencode-worker.sh"
+export TL_GRILL_CMD="$TL_HOME/adapters/opencode-grill.sh"
+export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"
+```
+
+Then, with either set, register + baseline a small throwaway project, add a backlog item, and run
+the pipeline:
+
+```sh
 bin/tl-grill.sh <slug> && bin/tl-brief.sh <id>
 bin/tl-spawn.sh --id r1 --project <path> --project-name <name> --kind change --brief data/<id>/brief.md
 bin/tl-watch.sh --once
 TL_APPROVE=yes bin/tl-deliver.sh r1
 ```
 
-A tiny change costs roughly **$0.40** — dominated by Claude Code's fixed per-invocation context,
-not the task. This is the only path that needs `claude` installed and authenticated.
+Both were validated this way against the same `add-farewell` task and produced an identical change
+delivered onto `main` — the agent harness is a swappable seam.
 
 ## Adding a smoke test
 

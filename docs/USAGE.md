@@ -75,9 +75,15 @@ export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"   # local, $0; or opencode/*-f
 For a token-free dry run with no agent at all, point them at the demo drivers under `test/`
 (`test/demo-worker.sh`, `test/demo-grill.sh`).
 
-A worker adapter receives its context via env — `TL_TASK_ID`, `TL_TASK_KIND`, `TL_BRIEF` (a file
-path or string), `TL_WORKTREE`, `TL_REPORT` — and must write its deliverable to `$TL_REPORT`.
-Swapping in Codex/aider is a new adapter, nothing else.
+Four adapters ship today — `claude-{worker,grill}` and `opencode-{worker,grill}` under `adapters/`.
+Adding another harness (Codex, aider, …) is just another adapter; nothing in `bin/` changes.
+
+- A **worker** adapter gets `TL_TASK_ID`, `TL_TASK_KIND`, `TL_BRIEF` (file path or string),
+  `TL_WORKTREE`, `TL_REPORT`. It does the task in the worktree, writes the deliverable to
+  `$TL_REPORT`, and (for `change`) commits on `tl/<id>`.
+- A **grill** adapter gets `TL_GRILL_SLUG`, `TL_GRILL_TITLE`, `TL_GRILL_BODY` (file),
+  `TL_QUESTIONS` (the bank), `TL_DECISIONS`. It prints one tab-separated
+  `qid⇥answer_state⇥source⇥text` line per question and must not touch the instance.
 
 ## Register a project and capture a baseline (needed for `change`)
 
@@ -241,6 +247,7 @@ TL_APPROVE=yes bin/tl-deliver.sh af1           # gate → ff-merge onto main
 | `TL_DATA` / `TL_STATE` / `TL_WORKTREES` | Override storage locations (default under `TL_HOME`). |
 | `TL_WORKER_CMD` | Worker adapter (real agent or demo). |
 | `TL_GRILL_CMD` | Grill inference driver. |
+| `TL_OPENCODE_MODEL` | Model for the opencode adapters (e.g. `ollama/qwen3-coder:30b`); must support tools. |
 | `TL_BACKLOG` | Backlog path (default `data/backlog.md`). |
 | `TL_APPROVE=yes` | Non-interactive approval (tests/automation); `TL_RESOLVE` sets the finding resolution. |
 | `TL_WATCH_INTERVAL` / `TL_FRESH_SECS` / `TL_DONE_STABLE` | Watcher tuning. |

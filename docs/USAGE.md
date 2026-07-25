@@ -64,13 +64,16 @@ export TL_GRILL_CMD="$TL_HOME/adapters/opencode-grill.sh"
 export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"   # local, $0; or opencode/*-free, or a cloud model
 ```
 
-> opencode needs a **tools-capable** model (function calling) — a coding model like `qwen3-coder`,
-> **not** one without tool support (e.g. `deepseek-coder-heretic` errors with "does not support
-> tools"). Local models record `$0` cost, and opencode's worker report narrates its tool use
-> (Claude returns a cleaner final result) — cosmetic only; the change, gate, and delivery are
-> identical. The grill adapter locates the `answer_state` field and assigns its own question ids,
-> so it tolerates a weaker model's loose formatting — but grill *quality* still tracks the model:
-> a small local model infers coarsely (it tends to mark everything `decided`).
+> **For local models, use `ollama/qwen3-coder:30b`.** It's the only coding-specialized tool-caller
+> that reliably drives opencode's edit loop, and it's the model validated here end-to-end. Other
+> local models either lack tool support (`deepseek-coder-heretic` errors "does not support tools")
+> or code weakly / reason instead of acting (gemma, deepseek-r1, the vision models). Any model
+> **must** be tools-capable (function calling).
+>
+> Local models record `$0` cost, and opencode's worker report narrates its tool use (Claude returns
+> a cleaner result) — cosmetic; the change, gate, and delivery are identical. Grill *quality* still
+> tracks the model: a local model infers coarsely (qwen3-coder tends to mark everything `decided`);
+> for sharper grills point `TL_OPENCODE_MODEL` at an `opencode/*-free` or cloud model.
 
 For a token-free dry run with no agent at all, point them at the demo drivers under `test/`
 (`test/demo-worker.sh`, `test/demo-grill.sh`).
@@ -247,7 +250,7 @@ TL_APPROVE=yes bin/tl-deliver.sh af1           # gate → ff-merge onto main
 | `TL_DATA` / `TL_STATE` / `TL_WORKTREES` | Override storage locations (default under `TL_HOME`). |
 | `TL_WORKER_CMD` | Worker adapter (real agent or demo). |
 | `TL_GRILL_CMD` | Grill inference driver. |
-| `TL_OPENCODE_MODEL` | Model for the opencode adapters (e.g. `ollama/qwen3-coder:30b`); must support tools. |
+| `TL_OPENCODE_MODEL` | Model for the opencode adapters; must support tools. **Local pick: `ollama/qwen3-coder:30b`.** |
 | `TL_BACKLOG` | Backlog path (default `data/backlog.md`). |
 | `TL_APPROVE=yes` | Non-interactive approval (tests/automation); `TL_RESOLVE` sets the finding resolution. |
 | `TL_WATCH_INTERVAL` / `TL_FRESH_SECS` / `TL_DONE_STABLE` | Watcher tuning. |

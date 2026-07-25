@@ -100,13 +100,14 @@ export TL_WORKER_CMD="$TL_HOME/adapters/claude-worker.sh"
 export TL_GRILL_CMD="$TL_HOME/adapters/claude-grill.sh"
 ```
 
-**opencode** — free with a **local** model (slower). Needs a **tools-capable** model.
+**opencode** — free with a **local** model (slower). Needs a **tools-capable** model; for local
+models use **`ollama/qwen3-coder:30b`** (coding-specialized — the only local model validated here).
 
 ```sh
 export TL_HOME="$PWD"
 export TL_WORKER_CMD="$TL_HOME/adapters/opencode-worker.sh"
 export TL_GRILL_CMD="$TL_HOME/adapters/opencode-grill.sh"
-export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"
+export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"   # recommended local model
 ```
 
 Then, with either set, register + baseline a small throwaway project, add a backlog item, and run

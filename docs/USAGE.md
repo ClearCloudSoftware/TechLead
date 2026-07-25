@@ -60,13 +60,17 @@ Or use **[opencode](https://opencode.ai)** — the agent harness is a seam, so t
 
 ```sh
 export TL_WORKER_CMD="$TL_HOME/adapters/opencode-worker.sh"
+export TL_GRILL_CMD="$TL_HOME/adapters/opencode-grill.sh"
 export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"   # local, $0; or opencode/*-free, or a cloud model
 ```
 
 > opencode needs a **tools-capable** model (function calling) — a coding model like `qwen3-coder`,
 > **not** one without tool support (e.g. `deepseek-coder-heretic` errors with "does not support
-> tools"). Local models record `$0` cost, and opencode's report narrates its tool use (Claude
-> returns a cleaner final result) — cosmetic only; the change, gate, and delivery are identical.
+> tools"). Local models record `$0` cost, and opencode's worker report narrates its tool use
+> (Claude returns a cleaner final result) — cosmetic only; the change, gate, and delivery are
+> identical. The grill adapter locates the `answer_state` field and assigns its own question ids,
+> so it tolerates a weaker model's loose formatting — but grill *quality* still tracks the model:
+> a small local model infers coarsely (it tends to mark everything `decided`).
 
 For a token-free dry run with no agent at all, point them at the demo drivers under `test/`
 (`test/demo-worker.sh`, `test/demo-grill.sh`).

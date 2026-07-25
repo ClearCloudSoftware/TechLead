@@ -2,3 +2,4 @@
 /data/
 /state/
 /config/
+/projects/     # managed repo clones — the lead is read-only over these (§3.2)

@@ -64,8 +64,14 @@ TechLead works on a *registered* project with a **test baseline** (so a `change`
 known-failing, not against green). Create the app as a stub plus a test script that prints one
 failing-check id per broken behavior — that's the contract `tl-gate` expects.
 
+> **Where projects live.** By convention managed repos sit under **`$TL_HOME/projects/`** (§3.2 — the
+> lead is read-only there). But TechLead registers a project by its **absolute path**, so it can live
+> anywhere you keep repos; just point the registry at it. Note `TL_HOME` is *TechLead's own checkout*,
+> **not** your OS `$HOME` — don't confuse the two.
+
 ```sh
-APP="$HOME/todo-app"
+mkdir -p "$TL_HOME/projects"
+APP="$TL_HOME/projects/todo-app"          # or your own projects folder, e.g. ~/projects/todo-app
 mkdir -p "$APP"; cd "$APP"
 
 # a stub CLI — does nothing yet; TechLead will fill it in
@@ -155,7 +161,7 @@ tl-grill.sh answer tl-add-list q2 decided "index is 1-based; store one task per 
 ```sh
 tl-brief.sh tl-add-list                                     # spec → data/tl-add-list/brief.md
 
-tl-spawn.sh --id add-1 --project "$HOME/todo-app" --project-name todo \
+tl-spawn.sh --id add-1 --project "$APP" --project-name todo \
             --kind change --brief "$TL_HOME/data/tl-add-list/brief.md"
 ```
 
@@ -183,7 +189,7 @@ to merge until you resolve them (approve / skip / fix). A clean feature merges s
 Check it:
 
 ```sh
-cd "$HOME/todo-app"
+cd "$APP"
 TODO_FILE=/tmp/t python3 todo.py add "buy milk" && TODO_FILE=/tmp/t python3 todo.py list
 cd "$TL_HOME"
 ```
@@ -197,7 +203,7 @@ Same loop, now that `add-list` has landed:
 ```sh
 tl-grill.sh  mark-done
 tl-brief.sh  tl-mark-done
-tl-spawn.sh  --id done-1 --project "$HOME/todo-app" --project-name todo \
+tl-spawn.sh  --id done-1 --project "$APP" --project-name todo \
              --kind change --brief "$TL_HOME/data/tl-mark-done/brief.md"
 tl-watch.sh  --once
 tl-deliver.sh done-1
@@ -228,8 +234,8 @@ spawned. That refusal — not the code — is what makes it a *tech lead* and no
 Independent features can run in parallel. Spawn two, then let the watcher supervise both:
 
 ```sh
-tl-spawn.sh --id a --project "$HOME/todo-app" --project-name todo --kind change --brief .../brief-a.md
-tl-spawn.sh --id b --project "$HOME/todo-app" --project-name todo --kind change --brief .../brief-b.md
+tl-spawn.sh --id a --project "$APP" --project-name todo --kind change --brief .../brief-a.md
+tl-spawn.sh --id b --project "$APP" --project-name todo --kind change --brief .../brief-b.md
 tl-watch.sh      # wakes you only when one needs a decision or is ready; zero tokens while idle
 ```
 

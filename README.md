@@ -8,15 +8,22 @@ prompt files — no daemon, no SQLite, no LLM in the supervision loop.
 - **`bin/tl-*.sh`** — the deterministic toolbelt.
 - **`lead/`** — the judgment layer (Phase 0 stub; the actual product).
 
-## Phase 0 tracer bullet (working)
+## Phase 0 (working)
 
-Dispatch one `plan` task into an isolated worktree, collect its report, approve, tear down —
-end to end, no supervision loop or grill yet.
+The full pipeline runs end to end for `plan` and `change` kinds:
+
+```
+backlog → grill → spec → brief → spawn → worktree → worker → watch → gate → deliver
+```
+
+- **How to use it:** [docs/USAGE.md](docs/USAGE.md)
+- **How to test it:** [docs/TESTING.md](docs/TESTING.md)
+
+Quick check (no agent, no tokens):
 
 ```sh
 export TL_HOME="$PWD"
-export TL_WORKER_CMD="$PWD/test/demo-worker.sh"   # swap for a real agent CLI later
-test/smoke.sh
+for t in smoke watch-smoke change-smoke grill-smoke; do ./test/$t.sh || break; done
 ```
 
 ## Where the plan lives

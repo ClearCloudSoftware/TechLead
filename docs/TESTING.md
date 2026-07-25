@@ -13,7 +13,7 @@ asserts the single most important invariant in the system directly.
 
 ```sh
 cd /path/to/techlead
-for t in smoke watch-smoke change-smoke grill-smoke; do
+for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke; do
   ./test/$t.sh && echo "$t OK" || { echo "$t FAILED"; break; }
 done
 ```
@@ -25,6 +25,7 @@ Or individually:
 ./test/watch-smoke.sh    # the zero-token supervisor + state reconciliation
 ./test/change-smoke.sh   # the change kind and all its guards
 ./test/grill-smoke.sh    # backlog → spec → brief
+./test/onboard-smoke.sh  # the setup wizards (tl-init / tl-onboard / tl-new)
 ```
 
 Each prints its stages and ends with a single `PASS: ...` line and exit code 0. Any `FAIL: ...`
@@ -62,6 +63,20 @@ Four cases against a registered project with a baseline:
 - The owner answers the delta → `specified` → `tl-brief` now renders the constraints.
 - The **reject path** records "don't build this" against the backlog.
 - **Decay:** an answer dated in the past forces `tl-brief` to refuse until it's re-confirmed.
+
+### `onboard-smoke.sh` — the setup wizards (Epic 11)
+Drives all three wizards **non-interactively** (zero prompts, no live model), asserting the
+orchestrator-not-owner contract (§3.1) holds end to end:
+- **`tl-init`** writes `config/instance.env`, and a fresh shell auto-loads `TL_WORKER_CMD` from it
+  (the W1 round-trip). The real `lead/` is left untouched (seeding declined).
+- **`tl-onboard`** registers a brownfield repo **through `tl-project` only** and captures a baseline
+  through `tl-baseline` — the `.conf` gets `mode`/`test_command`/`danger_paths` (detected) and
+  `readiness=ready`, the path is the canonical toplevel, and the baseline holds the known-failing ids.
+- **`tl-new`** creates an **empty** repo under `TL_PROJECTS_DIR` and registers it at
+  `readiness=survey` with no `test_command` (plan-only) — proving it scaffolds no app boilerplate.
+
+It redirects `TL_CONFIG` and `TL_PROJECTS_DIR` into the temp sandbox (alongside `TL_DATA`/`TL_STATE`),
+so your real `config/` and `projects/` are never touched.
 
 ## Test fixtures (the fake workers/drivers)
 

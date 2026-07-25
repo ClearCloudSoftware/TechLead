@@ -36,14 +36,18 @@ cd /path/to/techlead
 export TL_HOME="$PWD"
 export PATH="$PWD/bin:$PATH"
 
-# use opencode for both the worker and the grill, on the local model
-export TL_WORKER_CMD="$TL_HOME/adapters/opencode-worker.sh"
-export TL_GRILL_CMD="$TL_HOME/adapters/opencode-grill.sh"
-export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"
+# configure the instance once, with the wizard: pick `opencode` as the harness and
+# `ollama/qwen3-coder:30b` as the model when asked, and say yes to seeding the lead/ skeleton.
+tl-init.sh
 ```
 
-The grill needs a **question bank** — your judgment, the questions you'd actually ask. Seed a
-starter one (you'd grow this from real grills over time — that's the `lead/` judgment layer):
+`tl-init` writes `config/instance.env` (the worker + grill adapters and the model), which every
+`tl-*` command auto-loads — so you don't re-export anything each shell — and scaffolds `lead/` as
+empty stubs.
+
+The grill needs a **question bank** — your judgment, the questions you'd actually ask. `tl-init`
+left `lead/questions.md` as an empty stub; fill it (you'd grow this from real grills over time —
+that's the `lead/` judgment layer):
 
 ```sh
 cat > "$TL_HOME/lead/questions.md" <<'EOF'
@@ -71,7 +75,7 @@ failing-check id per broken behavior — that's the contract `tl-gate` expects.
 
 ```sh
 mkdir -p "$TL_HOME/projects"
-APP="$TL_HOME/projects/todo-app"          # or your own projects folder, e.g. ~/projects/todo-app
+APP="$TL_HOME/projects/todo"               # or your own projects folder, e.g. ~/projects/todo
 mkdir -p "$APP"; cd "$APP"
 
 # a stub CLI — does nothing yet; TechLead will fill it in
@@ -99,19 +103,22 @@ chmod +x test.sh
 git init -q -b main && git add -A && git commit -q -m "stub: todo CLI + tests"
 ```
 
-Register it and capture the baseline (with the stub, **everything fails** — that's the starting
-point TechLead will improve on):
+Register it and capture the baseline with the wizard (with the stub, **everything fails** — that's
+the starting point TechLead will improve on):
 
 ```sh
 cd "$TL_HOME"
-tl-project.sh set todo path "$APP"
-tl-project.sh set todo mode local-only          # fast-forward merge onto main (no remote needed)
-tl-project.sh set todo default_branch main
-tl-project.sh set todo readiness ready
-tl-project.sh set todo test_command "sh test.sh"
-tl-project.sh set todo max_files_changed 5
-tl-baseline.sh todo                             # records: feat-add, feat-done as known-failing
+tl-onboard.sh "$APP"
+# It detects branch=main and mode=local-only — accept those. It can't guess our custom runner, so
+# when asked enter the test command `sh test.sh`, set max files to `5`, and say yes to capturing the
+# baseline (records feat-add, feat-done as known-failing). Decline the survey offer — we'll grill
+# features directly. Registered as `todo` at readiness=ready.
 ```
+
+> **Greenfield vs brownfield.** We wrote `test.sh` first, so `tl-onboard` can baseline it and
+> register at `ready` (change tasks allowed). A *truly empty* project would instead use
+> `tl-new todo`, which registers at `survey` (plan-only) until an early plan task builds a test
+> harness — then `tl-baseline` promotes it to `ready`.
 
 ---
 

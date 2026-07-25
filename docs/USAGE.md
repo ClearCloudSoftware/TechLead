@@ -47,6 +47,26 @@ export PATH="$PWD/bin:$PATH"     # optional, so you can type `tl-spawn` instead 
 `data/`, `state/`, and `config/` are created under `TL_HOME` on first use. Override their location
 with `TL_DATA` / `TL_STATE` / `TL_WORKTREES` (the tests do this to stay isolated).
 
+### Guided setup (the wizard)
+
+Three commands wrap the raw configuration below, so setup is a few keystrokes instead of a page of
+`tl-project` calls — all bash, no new runtime:
+
+```sh
+bin/tl-init.sh                       # instance config → config/instance.env: harness, model,
+                                     #   TL_PROJECTS_DIR, and an optional lead/ skeleton
+bin/tl-onboard.sh /abs/path/to/repo  # brownfield: register an EXISTING repo in place + baseline
+bin/tl-new.sh myapp                  # greenfield: create an empty repo under TL_PROJECTS_DIR
+```
+
+`tl-init` writes `config/instance.env`, which every `tl-*` command auto-loads — **env you already
+set in the shell still wins** — so you configure the harness/model once instead of every shell.
+`tl-onboard` (existing repo, registered at `ready` once baselined) and `tl-new` (new empty repo,
+registered at `survey` = plan-only) **call `tl-project`/`tl-baseline` for you; they never write the
+registry themselves** (§3.1). All three take `--yes` (plus `TL_ANSWER_*` env) to run
+non-interactively. The sections below are the manual equivalents and define every field the wizard
+asks about.
+
 ## Wire a real agent
 
 Workers and the grill are pluggable adapters, selected by env var:
@@ -93,6 +113,9 @@ Adding another harness (Codex, aider, …) is just another adapter; nothing in `
 A `change` task compares test results against a recorded baseline, so a repo needs registering
 first. Config is one `key=value` file per project under `data/projects/<name>.conf`, owned by
 `tl-project.sh` (never hand-parsed elsewhere).
+
+**The easy path is `tl-onboard` above** — it detects the defaults, confirms them, and captures the
+baseline for you. What follows is the manual equivalent (and what each field the wizard asks means):
 
 ```sh
 tl-project.sh set myapp path /abs/path/to/myapp

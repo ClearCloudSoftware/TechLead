@@ -56,7 +56,19 @@ export TL_WORKER_CMD="$TL_HOME/adapters/claude-worker.sh"   # real Claude Code w
 export TL_GRILL_CMD="$TL_HOME/adapters/claude-grill.sh"     # real Claude Code grill inference
 ```
 
-For a token-free dry run, point them at the demo drivers under `test/` instead
+Or use **[opencode](https://opencode.ai)** — the agent harness is a seam, so this is the only change:
+
+```sh
+export TL_WORKER_CMD="$TL_HOME/adapters/opencode-worker.sh"
+export TL_OPENCODE_MODEL="ollama/qwen3-coder:30b"   # local, $0; or opencode/*-free, or a cloud model
+```
+
+> opencode needs a **tools-capable** model (function calling) — a coding model like `qwen3-coder`,
+> **not** one without tool support (e.g. `deepseek-coder-heretic` errors with "does not support
+> tools"). Local models record `$0` cost, and opencode's report narrates its tool use (Claude
+> returns a cleaner final result) — cosmetic only; the change, gate, and delivery are identical.
+
+For a token-free dry run with no agent at all, point them at the demo drivers under `test/`
 (`test/demo-worker.sh`, `test/demo-grill.sh`).
 
 A worker adapter receives its context via env — `TL_TASK_ID`, `TL_TASK_KIND`, `TL_BRIEF` (a file

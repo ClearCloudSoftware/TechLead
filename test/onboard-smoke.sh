@@ -32,7 +32,7 @@ printf '#!/bin/sh\necho feat-add\necho feat-done\n' > "$APP/test.sh"; chmod +x "
 git -C "$APP" init -q -b main
 git -C "$APP" -c user.email=t@t -c user.name=t add -A
 git -C "$APP" -c user.email=t@t -c user.name=t commit -q -m stub
-TL_ANSWER_TEST_COMMAND="sh test.sh" "$BIN/tl-onboard.sh" "$APP" --yes </dev/null
+TL_ANSWER_TEST_COMMAND="sh test.sh" "$BIN/tl-onboard.sh" "$APP" --yes </dev/null 2>"$WORK/onboard.err"
 
 CONF="$TL_DATA/projects/app.conf"
 [ -f "$CONF" ] || fail "no registry entry at $CONF"
@@ -45,7 +45,10 @@ want="$(cd "$APP" && pwd -P)"; got="$("$BIN/tl-project.sh" get app path)"
 BL="$("$BIN/tl-project.sh" get app baseline)"
 [ -s "$BL" ] || fail "baseline file missing or empty"
 grep -qx feat-add "$BL" && grep -qx feat-done "$BL" || fail "baseline did not capture the known-failing ids"
-echo "  ok — app registered (readiness=ready) with a 2-id baseline, path canonical, via tl-project"
+# W6 decline path: default is no → registered + a manual-dispatch hint, no worker spawned
+grep -q "survey deferred" "$WORK/onboard.err" || fail "onboard did not offer/defer the survey hand-off (W6)"
+[ -e "$TL_STATE/survey-app.meta" ] && fail "survey worker spawned despite declining" || true
+echo "  ok — app registered (readiness=ready) with a 2-id baseline, path canonical, via tl-project; survey deferred"
 
 echo "== W7: tl-new creates + registers a greenfield repo at survey =="
 "$BIN/tl-new.sh" webapp --yes </dev/null
@@ -56,4 +59,18 @@ grep -q  "^test_command="    "$NCONF" && fail "greenfield should have no test_co
 [ -n "$(git -C "$TL_PROJECTS_DIR/webapp" ls-files)" ] && fail "greenfield repo should be empty (no scaffolding)"
 echo "  ok — webapp created empty and registered at survey (plan-only)"
 
-echo "PASS: wizards register brownfield (ready+baseline) and greenfield (survey) with zero prompts"
+echo "== W6: accepting the survey dispatches a plan worker (demo driver, no tokens) =="
+APP2="$WORK/app2"; mkdir -p "$APP2"
+printf '#!/bin/sh\necho feat-x\n' > "$APP2/test.sh"; chmod +x "$APP2/test.sh"
+git -C "$APP2" init -q -b main
+git -C "$APP2" -c user.email=t@t -c user.name=t add -A
+git -C "$APP2" -c user.email=t@t -c user.name=t commit -q -m stub
+TL_WORKER_CMD="$REPO/test/demo-worker.sh" TL_ANSWER_TEST_COMMAND="sh test.sh" TL_ANSWER_SURVEY=y \
+  "$BIN/tl-onboard.sh" "$APP2" --yes </dev/null 2>"$WORK/onboard2.err"
+[ -f "$TL_STATE/survey-app2.meta" ] || fail "survey task was not dispatched on accept"
+grep -qx "kind=plan" "$TL_STATE/survey-app2.meta" || fail "survey task was dispatched but not as a plan task"
+i=0; while [ $i -lt 30 ]; do [ -f "$TL_DATA/survey-app2/report.md" ] && break; sleep 1; i=$((i+1)); done
+[ -f "$TL_DATA/survey-app2/report.md" ] || fail "survey plan worker produced no report"
+echo "  ok — survey dispatched as a plan task via tl-spawn; report produced"
+
+echo "PASS: wizards register brownfield (ready+baseline) and greenfield (survey), survey hand-off dispatches/defers, zero prompts"

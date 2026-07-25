@@ -56,4 +56,27 @@ fi
 pj readiness "$ready"
 
 tl_log "registered '$name' (readiness=$ready)"
+
+# Survey hand-off (§2.7): onboarding *is* a plan task whose deliverable is the repo's AGENTS.md /
+# CONTEXT.md — not a special mechanism. Offer to dispatch it through the normal path (tl-spawn
+# --kind plan). Declining leaves the project registered for manual dispatch. Default no: spawning a
+# worker spends tokens and needs a configured harness.
+sid="survey-$name"
+if tl_confirm SURVEY "dispatch the survey plan task now (writes the repo's AGENTS.md / CONTEXT.md)" "n"; then
+  : "${TL_WORKER_CMD:?tl: no worker configured — run tl-init or set TL_WORKER_CMD before dispatching}"
+  brief="$TL_DATA/$sid/brief.md"; mkdir -p "$TL_DATA/$sid"
+  {
+    printf '# Survey: %s\n\n' "$name"
+    printf 'Produce the onboarding docs for this repo (%s) — owner-only, zero blast radius:\n' "$path"
+    printf -- '- **AGENTS.md** — layout map, how to run tests, current *and* superseded conventions, danger zones.\n'
+    printf -- '- **CONTEXT.md** — the domain glossary/vocabulary that lets one word replace a paragraph.\n\n'
+    printf 'Read before writing. Do not touch application code — this is a plan task (a written report).\n'
+  } > "$brief"
+  "$BIN/tl-spawn.sh" --id "$sid" --project "$path" --project-name "$name" --kind plan --brief "$brief"
+  printf 'tl: survey dispatched (%s) — supervise: tl-watch --once ; then: tl-approve %s\n' "$sid" "$sid" >&2
+else
+  printf 'tl: survey deferred → dispatch it later with:\n' >&2
+  printf 'tl:   tl-spawn --id %s --project %s --project-name %s --kind plan --brief <brief>\n' "$sid" "$path" "$name" >&2
+fi
+
 printf 'tl: next → add a backlog item to data/backlog.md, then grill it:  tl-grill <slug>\n' >&2

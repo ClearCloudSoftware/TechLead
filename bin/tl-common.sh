@@ -14,6 +14,13 @@ if [ ! -f "$TL_HOME/AGENTS.md" ]; then
   exit 78
 fi
 
+# Instance config (§3.2, E11/W1): load once so the operator sets harness/model/adapters in one
+# place instead of every shell. The file (written by tl-init, single owner) uses conditional
+# assignments — `export X="${X:-val}"` — so anything already set in the shell wins over the file.
+# Absent file is a silent no-op. tl-init writes to this same path.
+TL_CONFIG="${TL_CONFIG:-$TL_HOME/config/instance.env}"; export TL_CONFIG
+[ -f "$TL_CONFIG" ] && . "$TL_CONFIG"
+
 TL_DATA="${TL_DATA:-$TL_HOME/data}"
 TL_STATE="${TL_STATE:-$TL_HOME/state}"
 TL_WORKTREES="${TL_WORKTREES:-$TL_STATE/wt}"

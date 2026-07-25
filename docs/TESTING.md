@@ -87,9 +87,25 @@ Every smoke:
 
 Nothing is left behind and no network or real agent is involved.
 
-## Testing against a real agent (optional)
+## Testing against a real agent
 
-To exercise a *real* agent end to end, as done during development. Two harnesses are wired; pick one:
+### Automated (local model, free) — `test/live-smoke.sh`
+
+```sh
+./test/live-smoke.sh                                     # default: ollama/qwen3-coder:30b
+TL_OPENCODE_MODEL=ollama/gemma4:26b ./test/live-smoke.sh # try another local model
+```
+
+Runs the whole pipeline — backlog → grill → brief → spawn → gate → deliver — through opencode + a
+local model, and asserts a farewell function lands on `main`. It is slow (minutes) and asserts the
+**outcome**, not exact intermediate output, so it tolerates model non-determinism (e.g. it answers
+any question the model leaves `open`, then checks the delivered change). It **skips cleanly**
+(exit 0) if opencode or the model isn't installed. The four demo smokes above stay the fast,
+deterministic suite; this is the real-local-agent check.
+
+### Manual — drive either harness yourself
+
+To exercise a *real* agent end to end by hand. Two harnesses are wired; pick one:
 
 **Claude Code** — spends tokens (~**$0.40** for a tiny change, dominated by Claude Code's fixed
 per-invocation context, not the task). Needs `claude` installed and authenticated.

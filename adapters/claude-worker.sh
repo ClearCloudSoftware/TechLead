@@ -23,7 +23,7 @@ Brief:
 $brief"
 
 echo "worker: launching claude ($kind) for $TL_TASK_ID"
-out="$(claude -p "$prompt" --output-format json --permission-mode "$mode" --max-turns 20)" \
+out="$(claude -p "$prompt" --output-format json --permission-mode "$mode" --max-turns 20 </dev/null)" \
   || { echo "worker: claude invocation failed" >&2; "$TL_HOME/bin/tl-status.sh" "$TL_TASK_ID" failed "claude invocation failed" || true; exit 1; }
 
 if [ "$(printf '%s' "$out" | jq -r '.is_error')" = "true" ]; then
@@ -35,6 +35,13 @@ fi
 
 mkdir -p "$(dirname "$TL_REPORT")"
 printf '%s' "$out" | jq -r '.result' > "$TL_REPORT"
+
+# change tasks: commit whatever claude edited so the delivery gate sees a diff on tl/<id>
+if [ "$kind" = change ] && [ -n "$(git -C "$TL_WORKTREE" status --porcelain 2>/dev/null)" ]; then
+  git -C "$TL_WORKTREE" add -A
+  git -C "$TL_WORKTREE" -c user.email=worker@techlead -c user.name="tl worker" commit -q -m "change: $TL_TASK_ID"
+  echo "worker: committed edits on $(git -C "$TL_WORKTREE" rev-parse --abbrev-ref HEAD)"
+fi
 
 # §3.16 cost: input side includes cache read + creation tokens
 in_="$(printf '%s' "$out" | jq '((.usage.input_tokens//0)+(.usage.cache_read_input_tokens//0)+(.usage.cache_creation_input_tokens//0))')"

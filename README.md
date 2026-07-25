@@ -18,6 +18,7 @@ backlog → grill → spec → brief → spawn → worktree → worker → watch
 
 - **How to use it:** [docs/USAGE.md](docs/USAGE.md)
 - **How to test it:** [docs/TESTING.md](docs/TESTING.md)
+- **Tutorial — build a todo app on a free local model:** [docs/tutorial-todo-app.md](docs/tutorial-todo-app.md)
 
 Quick check (no agent, no tokens):
 

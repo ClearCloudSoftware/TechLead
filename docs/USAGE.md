@@ -246,7 +246,21 @@ The worker's `report.md` in `data/<id>/` survives teardown.
 ```sh
 tl-cost.sh   report            # per-task token cost by category
 tl-metric.sh report            # grill + approval time per feature (the D13 kill-gate inputs)
+tl-metric.sh outcome           # per-grill inferred-answer accept/correct — the risk-1 signal (§8.1)
 ```
+
+The **outcome** view is the cheapest test of the core bet — "does `lead/` capture me?" (Epic 6/E6.4).
+Every inferred answer the owner leaves standing is an **accept**; overriding one with
+`tl-grill.sh answer <id> <qid> …` logs a **correct**. When a shipped feature reverts or gets
+hotfixed, record the lite outcome note by hand (E6.5/D11), citing the `q#` that missed it:
+
+```sh
+tl-spec.sh set <id> outcome "q3 missed the auth edge case — reverted"
+```
+
+The judgment layer's required shape (the ladder, non-application list, intensity, persistence, and
+the per-rule `hits:` counter) lives in **`lead/SHAPE.md`**. Content accretes from real grills — never
+seed it from someone else's judgment.
 
 ## A full worked example (real agent, ~$0.40 in tokens)
 

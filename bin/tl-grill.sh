@@ -30,6 +30,14 @@ case "${1:-}" in
     [ -n "$cur" ] || tl_die "no such question $qid in $id"
     case "$st" in decided|leaning|open|spike) ;; *) tl_die "answer_state must be decided|leaning|open|spike";; esac
     text="${*:-$(printf '%s' "$cur" | awk -F'|' '{print $5}')}"
+    # E6.4 risk-1 data (§2.6, §8.1): overriding an inferred *value* (not an open delta) is a labeled
+    # correction — log it. accepts are latent (source stays `inferred`); tl-metric outcome folds both.
+    psrc="$(printf '%s' "$cur" | awk -F'|' '{print $3}')"; pstate="$(printf '%s' "$cur" | awk -F'|' '{print $2}')"
+    case "$psrc:$pstate" in
+      inferred:decided|inferred:leaning|inferred:spike)
+        printf '%s\t%s\t%s\tcorrect\t%s\n' "$(date -u +%Y-%m-%d)" "$id" "$qid" "$pstate->$st" \
+          >> "$TL_DATA/inferred-outcomes.tsv" ;;
+    esac
     "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" owner "$(date -u +%Y-%m-%d)" "$text"
     _finalize "$id"; exit 0 ;;
   reject)  # reject ID reason...  — terminal "don't build this" (D10, §7.3)

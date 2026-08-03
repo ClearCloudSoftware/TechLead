@@ -34,6 +34,16 @@ echo "== owner answers the delta -> specified =="
 "$BIN/tl-grill.sh" answer "$ID" q2 decided "Staging, then prod-eu, then prod-us"
 [ "$("$BIN/tl-spec.sh" get "$ID" state)" = specified ] || fail "expected specified after answering the delta"
 
+echo "== risk-1: overriding an inferred answer logs a correction; the delta answer did not (E6.4) =="
+"$BIN/tl-grill.sh" answer "$ID" q1 decided "Introduce a dedicated secrets backend after all"
+LOG="$TL_DATA/inferred-outcomes.tsv"
+awk -F'\t' -v id="$ID" '$2==id && $3=="q1" && $4=="correct"{f=1} END{exit f?0:1}' "$LOG" \
+  || fail "override of inferred q1 not logged as a correction"
+awk -F'\t' -v id="$ID" '$2==id && $3=="q2"{f=1} END{exit f?1:0}' "$LOG" \
+  || fail "answering the open delta q2 wrongly logged a correction"
+[ "$("$BIN/tl-metric.sh" outcome | awk -v id="$ID" '$1==id{print $4}')" = 1 ] \
+  || fail "tl-metric outcome did not report 1 correction for $ID"
+
 echo "== brief now generates =="
 "$BIN/tl-brief.sh" "$ID"
 [ -f "$TL_DATA/$ID/brief.md" ] || fail "no brief.md produced"

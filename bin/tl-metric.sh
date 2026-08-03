@@ -20,5 +20,16 @@ case "${1:-}" in
         for (fe in feat) printf "%-18s %9d %11d %8d\n", fe, t[fe SUBSEP "grill"], t[fe SUBSEP "approve"], t[fe SUBSEP "self"]
       }' "$LEDGER"
     ;;
-  *) tl_die "usage: tl-metric record <feature> grill|approve|self <seconds> | tl-metric report";;
+  outcome)  # E6.4 — per-grill inferred-answer outcome (the risk-1 signal, §8.1). accept = an inferred
+            # answer left standing; correct = owner overrode an inferred value (logged by tl-grill
+            # answer). Reads specs via tl-spec (single owner, §3.1); folds in inferred-outcomes.tsv.
+    log="$TL_DATA/inferred-outcomes.tsv"
+    printf '%-22s %8s %8s %9s\n' "grill" "inferred" "accepted" "corrected"
+    for d in "$TL_DATA"/*/; do
+      id="$(basename "$d")"; [ -f "$d/spec.md" ] || continue
+      acc="$("$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '$3=="inferred" && $2!="open"{c++} END{print c+0}')"
+      cor="$([ -f "$log" ] && awk -F'\t' -v id="$id" '$2==id{s[$3]=1} END{n=0;for(k in s)n++;print n}' "$log" || echo 0)"
+      inf=$((acc+cor)); [ "$inf" -gt 0 ] && printf '%-22s %8d %8d %9d\n' "$id" "$inf" "$acc" "$cor"
+    done ;;
+  *) tl_die "usage: tl-metric record <feature> grill|approve|self <seconds> | tl-metric report | tl-metric outcome";;
 esac

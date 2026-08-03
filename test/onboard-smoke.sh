@@ -34,7 +34,7 @@ printf '#!/bin/sh\necho feat-add\necho feat-done\n' > "$APP/test.sh"; chmod +x "
 git -C "$APP" init -q -b main
 git -C "$APP" -c user.email=t@t -c user.name=t add -A
 git -C "$APP" -c user.email=t@t -c user.name=t commit -q -m stub
-TL_ANSWER_TEST_COMMAND="sh test.sh" "$BIN/tl-onboard.sh" "$APP" --yes </dev/null 2>"$WORK/onboard.err"
+TL_ANSWER_TEST_COMMAND="sh test.sh" TL_ANSWER_GRAPH_MODE=ast "$BIN/tl-onboard.sh" "$APP" --yes </dev/null 2>"$WORK/onboard.err"
 
 CONF="$TL_DATA/projects/app.conf"
 [ -f "$CONF" ] || fail "no registry entry at $CONF"
@@ -42,6 +42,7 @@ grep -qxF "mode=local-only"            "$CONF" || fail "mode not registered"
 grep -qxF "test_command=sh test.sh"    "$CONF" || fail "test_command not registered"
 grep -qxF "readiness=ready"            "$CONF" || fail "readiness not promoted to ready after baseline"
 grep -qxF "danger_paths=migrations/**" "$CONF" || fail "danger_paths not detected/registered"
+grep -qxF "graph_mode=ast"             "$CONF" || fail "graph_mode not registered by onboard (tl-search wire)"
 want="$(cd "$APP" && pwd -P)"; got="$("$BIN/tl-project.sh" get app path)"
 [ "$got" = "$want" ] || fail "registered path ($got) is not the canonical toplevel ($want)"
 BL="$("$BIN/tl-project.sh" get app baseline)"
@@ -67,12 +68,13 @@ printf '#!/bin/sh\necho feat-x\n' > "$APP2/test.sh"; chmod +x "$APP2/test.sh"
 git -C "$APP2" init -q -b main
 git -C "$APP2" -c user.email=t@t -c user.name=t add -A
 git -C "$APP2" -c user.email=t@t -c user.name=t commit -q -m stub
-TL_WORKER_CMD="$REPO/test/demo-worker.sh" TL_ANSWER_TEST_COMMAND="sh test.sh" TL_ANSWER_SURVEY=y \
+TL_WORKER_CMD="$REPO/test/demo-worker.sh" TL_ANSWER_TEST_COMMAND="sh test.sh" TL_ANSWER_SURVEY=y TL_ANSWER_GRAPH_MODE=ast \
   "$BIN/tl-onboard.sh" "$APP2" --yes </dev/null 2>"$WORK/onboard2.err"
 [ -f "$TL_STATE/survey-app2.meta" ] || fail "survey task was not dispatched on accept"
 grep -qx "kind=plan" "$TL_STATE/survey-app2.meta" || fail "survey task was dispatched but not as a plan task"
+grep -q "tl-search.sh build app2" "$TL_DATA/survey-app2/brief.md" || fail "graph build not a named survey deliverable (brief D2)"
 i=0; while [ $i -lt 30 ]; do [ -f "$TL_DATA/survey-app2/report.md" ] && break; sleep 1; i=$((i+1)); done
 [ -f "$TL_DATA/survey-app2/report.md" ] || fail "survey plan worker produced no report"
-echo "  ok — survey dispatched as a plan task via tl-spawn; report produced"
+echo "  ok — survey dispatched as a plan task via tl-spawn; graph build named in the survey brief; report produced"
 
 echo "PASS: wizards register brownfield (ready+baseline) and greenfield (survey), survey hand-off dispatches/defers, zero prompts"

@@ -142,6 +142,53 @@ tl-baseline.sh myapp        # runs test_command, records the known-failing set
 > The test-command contract (one failing id per line) is a Phase-0 simplification — wire your test
 > runner to emit that. See the `# tl:` note in `tl-gate.sh`.
 
+## Code graph (`tl-search`)
+
+For a large project a worker's biggest cost is *discovery* — grep, read, guess, re-read (§3.16).
+`tl-search` gives the lead and workers a **queryable graph of the code** instead, behind a seam
+(`bin/tl-search.sh`) that is the *only* file that knows the graph tool (Graphify) exists — swap the
+tool there and nothing upstream changes, exactly as `tl-worktree.sh` wraps treehouse (§3.11).
+
+**Opt in per project, at onboard.** `tl-onboard` asks for a `graph_mode`:
+
+| Mode | Build | When |
+|---|---|---|
+| `off` (default) | none — plain grep | small repos, or until discovery is a *measured* drag |
+| `ast` | tree-sitter structure, **no LLM** | fast, free, structure-only map |
+| `semantic` | AST **+ LLM-enriched** edges | richest map; costs worker tokens once, needs an API key |
+
+Change it later with `tl-project set <name> graph_mode ast|semantic`.
+
+**Building the graph is a survey deliverable**, alongside `AGENTS.md`/`CONTEXT.md` — the onboarding
+survey brief names it. Build and query:
+
+```sh
+tl-search build   <project>              # build per the project's graph_mode (out-of-tree, gitignored)
+tl-search explain <project> "<symbol>"   # a symbol, its neighbours, its community
+tl-search query   <project> "what calls parseConfig?"
+tl-search path    <project> "AuthModule" "Database"
+tl-search status  <project>              # off | <mode> unbuilt | <mode> built=DATE [STALE=DATE]
+```
+
+Compact in, compact out; when there is no graph (or the tool is absent) it exits non-zero so the
+caller falls back to grep. Three call sites use it: the **worker** (its brief names `tl-search` as the
+first discovery step), the **grill** (may ground its questions in real structure), and the **review
+Spec axis** (once the `review` kind ships — it will check a diff against real callers/dependents
+rather than assumption).
+
+**Refresh.** A landed `change` re-runs the no-LLM `ast` refresh automatically (`tl-deliver`); a
+`semantic` graph is marked `STALE` instead of silently rebuilt (an LLM re-extract is not free) —
+rebuild it when worth it with `tl-search build <project>`. A stale graph that misdescribes the code is
+worse than none, so staleness is always surfaced, never hidden.
+
+**Cache discipline (§3.16).** Graph artifacts (`graph.json`, `graphify-out/`) are large and rebuilt
+often. They live under gitignored `data/`, are **never** written into a managed repo or a worker
+worktree, and are **never** loaded into the prompt prefix — only queried through the seam, which
+returns a projection. This protects the prompt cache, §3.16's largest unclaimed token win.
+
+**The boundary that must not blur.** The graph is *codebase memory* — a better map of the code. It is
+**not** `lead/`, which is the owner's authored *judgment*. Never feed graph output into `lead/`.
+
 ## The lifecycle, command by command
 
 ### 1. Author a backlog item

@@ -91,6 +91,21 @@ case "$kind" in plan|change) ;; *) tl_die "kind must be plan or change in Phase 
 tl_log "spawn $id — kind=$kind, project=$pname ($project), brief=${brief:-none}"
 
 pname="${pname:-$(basename "$project")}"   # registry key for the change gate (§3.12)
+
+# Worker discovery wire (§3.16, brief D4): on a graphed project, point the worker at tl-search BEFORE
+# raw file reads — blind discovery is the single largest worker token cost. Append to the brief the
+# worker reads (creating one if a plan task had none). No built graph → nothing is added.
+if "$BIN/tl-search.sh" status "$pname" 2>/dev/null | grep -q 'built='; then
+  [ -n "$brief" ] || { mkdir -p "$TL_DATA/$id"; brief="$TL_DATA/$id/brief.md"; }
+  { printf '\n## Discovery — search the graph first (§3.16)\n'
+    printf 'This project has a queryable code graph. BEFORE grep/read, ask it (compact, token-budgeted):\n'
+    printf -- '  %s/bin/tl-search.sh explain %s "<symbol>"     # a symbol, its neighbours, its community\n' "$TL_HOME" "$pname"
+    printf -- '  %s/bin/tl-search.sh query   %s "<question>"   # e.g. "what calls parseConfig?"\n' "$TL_HOME" "$pname"
+    printf 'Fall back to grep only when the graph cannot answer.\n'
+  } >> "$brief"
+  tl_log "brief points $id at the $pname code graph (tl-search)"
+fi
+
 wt="$(tl_worktree_acquire "$project" "$id")"
 wt="$(cd "$wt" && pwd -P)"   # canonicalize: git resolves symlinks (macOS /var -> /private/var)
 # §3.9: spawn refuses unless the resolved path is a real worktree root distinct from the primary checkout.

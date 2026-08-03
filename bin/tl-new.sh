@@ -41,6 +41,7 @@ pj mode local-only            # no remote yet → fast-forward locally
 pj default_branch main
 pj max_files_changed 25
 pj readiness survey           # §2.7: no baseline yet → plan-only until a test harness exists
+pj graph_mode off             # tl: greenfield starts empty — enable once it has code: tl-project set <name> graph_mode ast|semantic
 
 tl_log "created + registered '$name' (readiness=survey, plan-only) — $abs"
 printf 'tl: next → add a backlog item, then grill a first plan task to set up structure + a test\n' >&2

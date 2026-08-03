@@ -48,6 +48,10 @@ brief="$TL_DATA/$id/brief.md"
 if [ ! -f "$brief" ]; then tl_log "run[$id]: brief"; "$BIN/tl-brief.sh" "$id"; fi
 
 # ---- stage: spawn (deterministic; Part A resolves project/kind/brief), then HAND OFF and return ----
+# tl: tl-run takes only a slug, so it leans on tl-spawn to resolve the project — the sole registered
+#     one, or the spec's `project` field. On a multi-project instance, pin it first
+#     (tl-spec set "$id" project NAME) or the spawn refuses naming the missing piece; add a
+#     `tl-run --project NAME` passthrough if managing several projects at once becomes common.
 if [ ! -f "$(tl_meta_file "$id")" ]; then
   tl_log "run[$id]: spawn"
   "$BIN/tl-spawn.sh" "$id"

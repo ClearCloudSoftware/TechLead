@@ -281,6 +281,12 @@ back to the individual `tl-*` commands above, always continues from where the pi
 `tl-run` is a thin convenience over those commands, **not** a replacement; the manual path stays the
 fallback when you want finer control.
 
+> **Multi-project instances.** `tl-run` takes only a slug, so it leans on `tl-spawn`'s resolution to
+> pick the project — the sole registered one, or the spec's `project` field. If you manage more than
+> one project, pin it first with `tl-spec.sh set tl-<slug> project <name>` (otherwise the spawn stage
+> refuses, naming the missing piece), or dispatch that one by hand with
+> `tl-spawn.sh tl-<slug> --project <path> --project-name <name>`.
+
 ## Ledgers
 
 ```sh

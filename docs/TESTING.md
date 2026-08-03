@@ -13,7 +13,7 @@ asserts the single most important invariant in the system directly.
 
 ```sh
 cd /path/to/techlead
-for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke; do
+for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke tl-top-smoke; do
   ./test/$t.sh && echo "$t OK" || { echo "$t FAILED"; break; }
 done
 ```
@@ -27,6 +27,7 @@ Or individually:
 ./test/grill-smoke.sh    # backlog → spec → brief
 ./test/onboard-smoke.sh  # the setup wizards (tl-init / tl-onboard / tl-new)
 ./test/run-smoke.sh      # tl-spawn arg resolution + the tl-run pipeline driver
+./test/tl-top-smoke.sh   # the tl-top fleet-model builder (pure, no terminal, no instance)
 ```
 
 Each prints its stages and ends with a single `PASS: ...` line and exit code 0. Any `FAIL: ...`
@@ -91,6 +92,19 @@ Two related conveniences, proven deterministically (demo-grill + change-worker, 
   blocks), and is **resumable**: re-invoking recomputes the stage from files + `tl-state` (no driver
   state), so a mid-flight re-run neither re-spawns nor loses its place, and a clean change ff-merges
   while a regression is stopped at the gate.
+
+### `tl-top-smoke.sh` — the fleet viewer's logic (convenience view)
+
+`tl-top` is a `curses` TUI, which can't be driven headless — so the design splits its logic out:
+`build_fleet_model` is a **pure function** (read `tl-state` + the meta/findings files → sorted rows)
+with no curses calls, and this smoke asserts it directly via `tl-top --selftest`:
+- Given fixture task state, the right rows appear in the right **priority order** — stop-condition
+  tasks (unresolved gate findings, needs-decision, blocked, failed) sort **above** working/paused.
+- A torn-down task (`meta state=done`) is **excluded** from the fleet (mirrors `tl-watch` `active_ids`).
+- The **"waiting on"** column derives correctly (findings → `N finding(s)`, done → `review`,
+  working → quiet). The curses layer is then a thin, dumb render of this tested model.
+
+It needs no instance and no `TL_HOME` — the selftest builds its own throwaway fixture in `tmp`.
 
 ## Test fixtures (the fake workers/drivers)
 

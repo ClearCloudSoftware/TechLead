@@ -1,9 +1,29 @@
 # Changelog
 
 All notable changes to TechLead are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning tracks build phases —
-`v0.1` = Phase 0, `v0.2` = Phase 1, … `v1.0` when all four task kinds ship — and is **hand-cut at
-phase boundaries**: a tag means the release ran a week of real use (§4).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning is
+[SemVer](https://semver.org) — `feat:` → minor, `fix:`/`chore:`/`docs:`/`refactor:` → patch,
+breaking → major — and is **hand-cut**, not automated: a tag means the release ran a week of real
+use (§4).
+
+## [0.2.0] — 2026-08-03
+
+The **judgment layer comes alive** (Epic 6) alongside new fleet tooling. Still Phase 0.
+
+### Added
+
+- **`lead/` judgment layer, seeded** — three architecture priors in `lead/principles.md`, each with a
+  per-rule hit counter, extracted from four hand-run grills on TechLead's own features; the required
+  shape in `lead/SHAPE.md`, plus the grill question bank and an ADR template (Epic 6, Track B).
+- **Inferred-answer outcome tracking** — `tl-grill` logs corrections to `data/inferred-outcomes.tsv`,
+  `tl-metric outcome` reports the per-grill accept/correct signal (the risk-1 metric), and `spec.md`
+  gains an `outcome:` field for lite outcome notes.
+- **`tl-run`** — pipeline driver that resolves `tl-spawn` arguments from state.
+- **`tl-top`** — read-only curses fleet view.
+
+### Changed
+
+- Versioning switched from phase-tracking to plain SemVer (see the header above).
 
 ## [0.1.0] — 2026-08-03
 

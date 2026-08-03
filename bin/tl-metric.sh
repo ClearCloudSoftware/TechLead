@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # tl-metric.sh — the D13 metric ledger: grill time + approval time per feature, from feature 1.
 # Pairs with per-rule reuse (E6.3) to evaluate the kill-gate at ~feature 15. Append-only TSV.
+# tl: grill/approve rows are per-invocation wall-clock, summed by `report` — active work only, not a
+#     start-to-finish span (that would count coffee breaks). `self` is a manual owner-entered
+#     counterfactual — a not-done task can't be instrumented. Upgrade: none needed for the gate.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
 LEDGER="$TL_DATA/metrics.tsv"
@@ -16,8 +19,12 @@ case "${1:-}" in
     awk -F'\t' '
       { t[$2 SUBSEP $3]+=$4; feat[$2]=1 }
       END {
-        printf "%-18s %9s %11s %8s\n","feature","grill_s","approve_s","self_s"
-        for (fe in feat) printf "%-18s %9d %11d %8d\n", fe, t[fe SUBSEP "grill"], t[fe SUBSEP "approve"], t[fe SUBSEP "self"]
+        printf "%-18s %9s %11s %8s %8s %-9s\n","feature","grill_s","approve_s","net_s","self_s","verdict"
+        for (fe in feat) {
+          g=t[fe SUBSEP "grill"]; a=t[fe SUBSEP "approve"]; s=t[fe SUBSEP "self"]; net=g+a
+          v = (s==0) ? "" : (net<s ? "faster ✓" : "slower ✗")   # D13: net owner-time vs do-it-myself
+          printf "%-18s %9d %11d %8d %8d %-9s\n", fe, g, a, net, s, v
+        }
       }' "$LEDGER"
     ;;
   outcome)  # E6.4 — per-grill inferred-answer outcome (the risk-1 signal, §8.1). accept = an inferred

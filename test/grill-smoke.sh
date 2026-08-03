@@ -26,6 +26,10 @@ ID="tl-rotate-creds"
 [ "$("$BIN/tl-spec.sh" get "$ID" state)" = drafted ] || fail "expected drafted (an open question exists)"
 [ "$("$BIN/tl-spec.sh" open-count "$ID")" = 1 ] || fail "expected exactly 1 open question"
 
+echo "== D13: the grill clocks its own time (E1.5) =="
+awk -F'\t' -v id="$ID" '$2==id && $3=="grill"{f=1} END{exit f?0:1}' "$TL_DATA/metrics.tsv" \
+  || fail "grill did not record a grill-time row in metrics.tsv"
+
 echo "== brief refuses while a question is open =="
 if "$BIN/tl-brief.sh" "$ID" >/tmp/gb.log 2>&1; then fail "brief did not refuse an unspecified spec"; fi
 grep -q refusing /tmp/gb.log || fail "expected a refusal, got: $(cat /tmp/gb.log)"

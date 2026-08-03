@@ -25,6 +25,7 @@ _finalize() {  # id — set state from open-count, then report
 case "${1:-}" in
   answer)  # answer ID QID STATE [text...]
     id="${2:?}"; qid="${3:?}"; st="${4:?}"; shift 4 || true
+    t0="$(date +%s)"
     [ -f "$("$BIN/tl-spec.sh" path "$id")" ] || tl_die "no spec for $id"
     cur="$("$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v q="$qid" '$1==q{print;exit}')"
     [ -n "$cur" ] || tl_die "no such question $qid in $id"
@@ -39,6 +40,7 @@ case "${1:-}" in
           >> "$TL_DATA/inferred-outcomes.tsv" ;;
     esac
     "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" owner "$(date -u +%Y-%m-%d)" "$text"
+    "$BIN/tl-metric.sh" record "$id" grill "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
     _finalize "$id"; exit 0 ;;
   reject)  # reject ID reason...  — terminal "don't build this" (D10, §7.3)
     id="${2:?}"; shift 2 || true; reason="${*:-unspecified}"
@@ -53,6 +55,7 @@ esac
 
 # ---- default: start/refresh a grill for a backlog slug ----
 slug="${1:?usage: tl-grill <backlog-slug> | answer|reject|show ...}"
+t0="$(date +%s)"
 [ -f "$BACKLOG" ] || tl_die "no backlog at $BACKLOG"
 title="$(awk -v s="$slug" 'index($0,"## "s":")==1{t=$0; sub("^## [^:]*: *","",t); print t; exit}' "$BACKLOG")"
 [ -n "$title" ] || tl_die "backlog item '$slug' not found (want a heading '## $slug: <title>')"
@@ -74,4 +77,5 @@ TL_QUESTIONS="$TL_HOME/lead/questions.md" TL_DECISIONS="$TL_HOME/lead/decisions"
     "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" "$src" "$(date -u +%Y-%m-%d)" "$text"
   done
 rm -f "$bodyf"
+"$BIN/tl-metric.sh" record "$id" grill "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
 _finalize "$id"

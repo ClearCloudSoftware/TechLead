@@ -236,12 +236,23 @@ sorted loud to the top so a glance answers "who needs me"; working/paused tasks 
 tl-top                 # live read-only fleet view; q to quit
 ```
 
-It **renders, never mutates.** Navigation is instant; the only keys with a consequence shell out to
-a real command — `p` → `tl-peek`, `r` → `tl-run`, `g` → `tl-deliver` — and `r`/`g` each require a
-confirm, then drop you into that command's own approve/skip/fix prompts (there is no bulk-approve,
-no single-keystroke merge). It is **never load-bearing**: if `tl-top` is broken or absent, every
-command above is the fallback, and killing it — even mid-action — changes nothing (the shelled
-command ran or didn't, on its own terms; `tl-top` holds no state).
+The keymap — navigation is instant, consequences are deliberate:
+
+| Key | Action | How |
+|-----|--------|-----|
+| `↑` / `↓` (or `k` / `j`) | move the selection | in-TUI, instant |
+| `enter` | expand / collapse the detail pane (peek snapshot + findings + spec/brief paths) | in-TUI, instant |
+| `p` | peek the selected worker's output full-screen | opens it in `$PAGER` (default `less`); returns on exit |
+| `r` | run / resume the pipeline for the selected task | **confirm**, then `tl-run <slug>` in the normal terminal |
+| `g` | resolve the delivery gate for the selected task | **confirm**, then `tl-deliver <id>` — its gate prompts approve/skip/fix per finding |
+| `q` | quit | — |
+
+It **renders, never mutates.** The only keys with a consequence (`p`, `r`, `g`) shell out to the
+real command; `r`/`g` each require a confirm, then drop you into that command's own
+approve/skip/fix prompts — there is no bulk-approve and no single-keystroke merge. It is **never
+load-bearing**: if `tl-top` is broken or absent, every command above is the fallback, and killing
+it — even mid-action — changes nothing (the shelled command ran or didn't, on its own terms;
+`tl-top` holds no state).
 
 ### 6a. Approve a `plan`
 
@@ -339,6 +350,8 @@ TL_APPROVE=yes bin/tl-deliver.sh af1           # gate → ff-merge onto main
 | `TL_BACKLOG` | Backlog path (default `data/backlog.md`). |
 | `TL_APPROVE=yes` | Non-interactive approval (tests/automation); `TL_RESOLVE` sets the finding resolution. |
 | `TL_WATCH_INTERVAL` / `TL_FRESH_SECS` / `TL_DONE_STABLE` | Watcher tuning. |
+| `TL_TOP_INTERVAL` | `tl-top` refresh interval, in seconds (default 2). |
+| `PAGER` | Pager for `tl-top`'s `p` (peek) key (default `less`). |
 | `TL_ANSWER_DECAY_DAYS` | Spec-answer staleness threshold (default 30). |
 
 ## Known limits (Phase 0)

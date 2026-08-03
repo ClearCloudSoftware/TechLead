@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
 # tl-spawn.sh — dispatch one task into an isolated worktree (§3.9, §3.11). Phase 0: plan | change.
+#
+# Usage:
+#   tl-spawn <id> [overrides...]     # <id> is the spec/task id; brief/project/project-name/kind are
+#                                    #   resolved from the spec + registry (deterministic, never guessed)
+#   tl-spawn --id <id> [flags...]    # explicit form — every field can be a flag (the manual path)
+#
+# Resolution (each field: explicit flag wins, then spec, then registry/readiness; otherwise a NAMED
+# refusal — never a silent wrong default):
+#   brief         --brief  > data/<id>/brief.md (if present)
+#   project-name  --project-name > spec `project` (if registered) > the sole registered project
+#   project path  --project > registry path(project-name)
+#   kind          --kind > spec `kind` > project readiness (survey→plan, ready/assisted→change)
+# The spec may pin `project`/`kind` via `tl-spec set <id> <field> <value>`. Explicit flags always win,
+# so the full-flag form stays 100% backward compatible.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"
 . "$BIN/tl-common.sh"; . "$BIN/tl-worktree.sh"; . "$BIN/tl-session.sh"
@@ -12,15 +26,70 @@ while [ $# -gt 0 ]; do
     --project-name) pname="$2"; shift 2;;
     --kind) kind="$2"; shift 2;;
     --brief) brief="$2"; shift 2;;
-    *) tl_die "unknown arg: $1";;
+    -h|--help) echo "usage: tl-spawn <id> [--project DIR] [--project-name NAME] [--kind plan|change] [--brief FILE]"; exit 0;;
+    -*) tl_die "unknown arg: $1";;
+    *) [ -z "$id" ] && id="$1" || tl_die "unexpected argument: $1"; shift;;
   esac
 done
-[ -n "$id" ] && [ -n "$project" ] && [ -n "$kind" ] || tl_die "usage: tl-spawn --id ID --project DIR --kind plan|change [--brief FILE]"
-case "$kind" in plan|change) ;; *) tl_die "kind must be plan or change in Phase 0 (got: $kind)";; esac
+[ -n "$id" ] || tl_die "usage: tl-spawn <id> [overrides]   (<id> is the spec/task id)"
 [ -f "$(tl_meta_file "$id")" ] && tl_die "task $id already exists"
-: "${TL_WORKER_CMD:?tl: no worker configured — set TL_WORKER_CMD to the harness adapter}"
 
-project="$(cd "$project" && pwd -P)"
+# ---- deterministic resolution from existing state (§3.1: read owners, never re-derive) ----
+spec="$("$BIN/tl-spec.sh" path "$id" 2>/dev/null || true)"
+sget() { [ -f "$spec" ] || return 0; "$BIN/tl-spec.sh" get "$id" "$1" 2>/dev/null || true; }
+reg_has()  { [ -f "$TL_DATA/projects/$1.conf" ]; }
+reg_path() { "$BIN/tl-project.sh" get "$1" path 2>/dev/null || true; }
+
+# brief: flag > data/<id>/brief.md
+if [ -z "$brief" ] && [ -f "$TL_DATA/$id/brief.md" ]; then brief="$TL_DATA/$id/brief.md"; fi
+
+# project (path) + project-name (registry key).
+if [ -n "$project" ]; then
+  # an explicit --project is the trusted manual path: canonicalize it and name it from the registry
+  # entry whose path matches (so the change gate still finds the config), else its basename.
+  project="$(cd "$project" 2>/dev/null && pwd -P)" || tl_die "project path does not exist for '$id': $project"
+  if [ -z "$pname" ]; then
+    for c in "$TL_DATA"/projects/*.conf; do
+      [ -f "$c" ] || continue; n="$(basename "$c" .conf)"
+      if [ "$(reg_path "$n")" = "$project" ]; then pname="$n"; break; fi
+    done
+    [ -n "$pname" ] || pname="$(basename "$project")"
+  fi
+else
+  # no explicit path → resolve the registry key (flag > spec `project` if registered > the sole
+  # registered project), then take that entry's path.
+  if [ -z "$pname" ]; then
+    sp="$(sget project)"
+    if [ -n "$sp" ] && reg_has "$sp"; then
+      pname="$sp"
+    else
+      count=0; sole=""
+      for c in "$TL_DATA"/projects/*.conf; do [ -f "$c" ] || continue; count=$((count + 1)); sole="$c"; done
+      if [ "$count" -eq 1 ]; then pname="$(basename "$sole" .conf)"; fi
+    fi
+  fi
+  if [ -n "$pname" ] && reg_has "$pname"; then project="$(reg_path "$pname")"; fi
+  [ -n "$project" ] || tl_die "cannot resolve project for '$id' — pass --project, set it on the spec (tl-spec set $id project NAME), or register exactly one project"
+  project="$(cd "$project" 2>/dev/null && pwd -P)" || tl_die "registered project path does not exist for '$pname': $project"
+fi
+
+# kind: flag > spec `kind` > project readiness (§2.7 ladder: survey→plan, ready/assisted→change)
+if [ -z "$kind" ]; then kind="$(sget kind)"; fi
+if [ -z "$kind" ] && reg_has "$pname"; then
+  case "$("$BIN/tl-project.sh" get "$pname" readiness 2>/dev/null || true)" in
+    survey) kind=plan;;
+    ready|assisted) kind=change;;
+  esac
+fi
+[ -n "$kind" ] || tl_die "cannot resolve kind for '$id' — pass --kind plan|change or set it on the spec (tl-spec set $id kind ...)"
+case "$kind" in plan|change) ;; *) tl_die "kind must be plan or change in Phase 0 (got: $kind)";; esac
+# NB: an explicit --project/--project-name is trusted even if unregistered (the manual path); the gate
+# degrades safely for an unregistered project. Resolution from the spec only ever uses a registered
+# name (checked above), so a phantom project can't be dispatched implicitly.
+
+: "${TL_WORKER_CMD:?tl: no worker configured — set TL_WORKER_CMD to the harness adapter}"
+tl_log "spawn $id — kind=$kind, project=$pname ($project), brief=${brief:-none}"
+
 pname="${pname:-$(basename "$project")}"   # registry key for the change gate (§3.12)
 wt="$(tl_worktree_acquire "$project" "$id")"
 wt="$(cd "$wt" && pwd -P)"   # canonicalize: git resolves symlinks (macOS /var -> /private/var)

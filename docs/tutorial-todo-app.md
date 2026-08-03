@@ -146,54 +146,54 @@ EOF
 
 ---
 
-## Step 4 — Build the first feature, end to end
+## Step 4 — Build the first feature with `tl-run`
 
-### Grill it into a spec
+`tl-run <slug>` walks the whole pipeline — grill → brief → spawn → gate → deliver — and **stops only
+at the two points where your judgment decides the outcome**. Everything else is automatic, and it
+never babysits the worker. (It's a thin wrapper over the individual `tl-*` commands, which still work
+by hand — see `docs/USAGE.md`; the manual path is always the fallback.)
 
-```sh
-tl-grill.sh add-list
-```
-
-The grill runs its **inference pass**: it answers what it can from your `lead/` files and asks you
-only the delta. On a small task, qwen3-coder tends to infer everything (`state=specified`,
-0 open) — you'll see the questions and their answer states printed. If it *does* leave one `open`:
+### First pass — grill, then spawn
 
 ```sh
-tl-grill.sh show add-list                                   # or: tl-spec.sh qlist tl-add-list
-tl-grill.sh answer tl-add-list q2 decided "index is 1-based; store one task per line"
+tl-run.sh add-list
 ```
 
-### Brief and dispatch
+This grills `add-list` into a spec. **Stop 1 — spec approval:** if the grill leaves any question
+`open`, `tl-run` halts and shows it — it never guesses your answer. On a small task qwen3-coder
+usually infers everything (0 open) and auto-advances to brief → spawn, then **returns**, leaving the
+worker running in an isolated worktree on branch `tl/tl-add-list`. If it *did* leave one open, answer
+it and re-run — `tl-run` picks up where it left off:
 
 ```sh
-tl-brief.sh tl-add-list                                     # spec → data/tl-add-list/brief.md
-
-tl-spawn.sh --id add-1 --project "$APP" --project-name todo \
-            --kind change --brief "$TL_HOME/data/tl-add-list/brief.md"
+tl-grill.sh answer tl-add-list q2 decided "index is 1-based; one task per line"
+tl-run.sh add-list                # resumes: brief → spawn → returns
 ```
 
-The worker (opencode) now edits `todo.py` in an **isolated worktree** on branch `tl/add-1`.
+### Supervise (don't babysit)
 
-### Supervise
+`tl-run` handed off and returned; the worker runs in the background. Watch if you like:
 
 ```sh
-tl-watch.sh --once        # classify the fleet once; or leave `tl-watch.sh` running
-tl-peek.sh add-1 20       # watch what the model is doing
-tl-state.sh add-1         # authoritative state: working | done | failed
+tl-watch.sh --once                # or leave `tl-watch.sh` running; zero tokens while idle
+tl-peek.sh  tl-add-list 20        # what the model is doing
+tl-state.sh tl-add-list           # working | done | failed
 ```
 
-On a local model this takes a few minutes. When `tl-state.sh add-1` says `done`, the worker has
-committed its edits.
+On a local model this takes a few minutes.
 
-### Gate and deliver
+### Second pass — gate and deliver
+
+When `tl-state.sh tl-add-list` says `done`, run the **same command** again. `tl-run` recomputes where
+the pipeline is and resumes at the gate:
 
 ```sh
-tl-deliver.sh add-1       # runs tests vs baseline + scope/danger checks, then ff-merges onto main
+tl-run.sh add-list
 ```
 
-If tests still fail vs baseline, or scope/danger trip, the gate surfaces **findings** and refuses
-to merge until you resolve them (approve / skip / fix). A clean feature merges straight onto `main`.
-Check it:
+**Stop 2 — gate findings:** it runs the tests vs the baseline plus the scope/danger checks. If any
+`ask-user` finding is unresolved it halts with the findings and the three resolutions
+(approve / skip / fix) and merges nothing. A clean feature ff-merges straight onto `main`. Check it:
 
 ```sh
 cd "$APP"
@@ -201,34 +201,38 @@ TODO_FILE=/tmp/t python3 todo.py add "buy milk" && TODO_FILE=/tmp/t python3 todo
 cd "$TL_HOME"
 ```
 
+> **Resumable, no hidden state.** `tl-run` keeps no progress of its own — it recomputes the stage from
+> the spec, brief, task meta, and `tl-state` every run. Kill it, re-run it, or drop back to the manual
+> `tl-grill`/`tl-brief`/`tl-spawn`/`tl-deliver` commands at any point; it always continues from where
+> the pipeline actually is.
+
 ---
 
 ## Step 5 — Build the second feature
 
-Same loop, now that `add-list` has landed:
+Same one command, now that `add-list` has landed:
 
 ```sh
-tl-grill.sh  mark-done
-tl-brief.sh  tl-mark-done
-tl-spawn.sh  --id done-1 --project "$APP" --project-name todo \
-             --kind change --brief "$TL_HOME/data/tl-mark-done/brief.md"
-tl-watch.sh  --once
-tl-deliver.sh done-1
+tl-run.sh mark-done               # grill → (answer any open) → brief → spawn → returns
+# ... wait for the worker: tl-state.sh tl-mark-done → done, then:
+tl-run.sh mark-done               # resumes at the gate → deliver
 ```
 
 Because the baseline already knew `feat-done` was failing, fixing it is **not** a regression — the
-gate passes. If `mark-done` had broken `feat-add`, that *would* show as a regression and block the
-merge. That's the point of the baseline.
+gate passes. If `mark-done` had broken `feat-add`, that *would* show as a regression and `tl-run`
+would halt at the gate, merging nothing. That's the point of the baseline.
 
 ---
 
 ## Step 6 — Let the lead say "no"
 
-The most senior move is refusing work. Grill the bait item and reject it:
+The most senior move is refusing work. `tl-run` on the bait item grills it and **halts at the spec
+stop**; reject it there and nothing is ever dispatched:
 
 ```sh
-tl-grill.sh  rewrite-in-rust
-tl-grill.sh  reject tl-rewrite-in-rust "Premature — no perf problem exists; revisit if profiling shows one"
+tl-run.sh   rewrite-in-rust               # grills, then halts at the spec (an open question)
+tl-grill.sh reject tl-rewrite-in-rust "Premature — no perf problem exists; revisit if profiling shows one"
+tl-run.sh   rewrite-in-rust               # now halts: "rejected — nothing dispatched"
 ```
 
 The reason is recorded against the backlog (`data/backlog.decisions`), and no worker is ever

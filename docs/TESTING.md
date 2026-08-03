@@ -13,7 +13,7 @@ asserts the single most important invariant in the system directly.
 
 ```sh
 cd /path/to/techlead
-for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke; do
+for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke; do
   ./test/$t.sh && echo "$t OK" || { echo "$t FAILED"; break; }
 done
 ```
@@ -26,6 +26,7 @@ Or individually:
 ./test/change-smoke.sh   # the change kind and all its guards
 ./test/grill-smoke.sh    # backlog → spec → brief
 ./test/onboard-smoke.sh  # the setup wizards (tl-init / tl-onboard / tl-new)
+./test/run-smoke.sh      # tl-spawn arg resolution + the tl-run pipeline driver
 ```
 
 Each prints its stages and ends with a single `PASS: ...` line and exit code 0. Any `FAIL: ...`
@@ -77,6 +78,19 @@ orchestrator-not-owner contract (§3.1) holds end to end:
 
 It redirects `TL_CONFIG` and `TL_PROJECTS_DIR` into the temp sandbox (alongside `TL_DATA`/`TL_STATE`),
 so your real `config/` and `projects/` are never touched.
+
+### `run-smoke.sh` — spawn consolidation + the `tl-run` driver
+Two related conveniences, proven deterministically (demo-grill + change-worker, no live model):
+- **`tl-spawn <id>`** resolves brief/project/kind from existing state (sole registered project;
+  readiness→kind); a spec `kind`/`project` field and explicit flags override; and each unresolvable
+  case (**no project**, **ambiguous project**, **unresolvable kind**) refuses with the missing piece
+  named and dispatches nothing. The full-flag form stays byte-for-byte compatible.
+- **`tl-run <slug>`** walks grill→brief→spawn→gate/deliver and **halts at the two owner-judgment
+  points** — an `open` spec (or a reject) before dispatch, and unresolved gate findings before merge
+  — while auto-advancing the deterministic stages. It hands off to `tl-watch` after spawn (never
+  blocks), and is **resumable**: re-invoking recomputes the stage from files + `tl-state` (no driver
+  state), so a mid-flight re-run neither re-spawns nor loses its place, and a clean change ff-merges
+  while a regression is stopped at the gate.
 
 ## Test fixtures (the fake workers/drivers)
 

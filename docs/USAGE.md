@@ -202,6 +202,17 @@ tl-spawn.sh --id t2 --project /abs/path/to/myapp --project-name myapp --kind cha
 `--project-name` links the task to its registry entry (needed for the `change` gate). Spawn
 acquires an isolated worktree, creates branch `tl/<id>`, and launches the worker adapter.
 
+Since the spec and registration already know these, **`tl-spawn <id>` resolves them for you** —
+brief from `data/<id>/brief.md`, project/name from the spec's `project` field or the sole registered
+project, and kind from the project's readiness (`survey`→plan, else `change`):
+
+```sh
+tl-spawn.sh tl-add-farewell        # same dispatch, resolved from existing state
+```
+
+Explicit flags always override (the manual path), and if a required value can't be resolved it
+refuses naming the missing piece — it never guesses a default that would dispatch the wrong thing.
+
 ### 5. Supervise
 
 ```sh
@@ -240,6 +251,41 @@ tl-teardown.sh t2 --force       # override the guard
 ```
 
 The worker's `report.md` in `data/<id>/` survives teardown.
+
+## Drive the pipeline in one command: `tl-run`
+
+`tl-run <backlog-slug>` walks a single item through the lifecycle above — grill → brief → spawn →
+gate/deliver — by calling the same `tl-*` commands, and **stops at exactly the two points where your
+judgment decides the outcome**:
+
+1. **Spec approval / reject** — after the grill, if any question is `open` (or the lead rejected the
+   item) it halts and shows the delta; it never auto-answers, and never dispatches an unspecified
+   spec. A clean, zero-open spec advances automatically (it prints the spec path and the
+   inferred/answered counts so you can still inspect it).
+2. **Gate findings** — at delivery, if any `ask-user` finding is unresolved it halts with the
+   findings and the three resolutions (approve / skip / fix). It never auto-resolves.
+
+Everything between and after those is deterministic. It does **not** babysit the worker: after
+spawning it hands supervision to `tl-watch` and returns, so a minutes-long worker never holds your
+terminal. Re-run `tl-run <slug>` once the worker is `done` to hit the gate.
+
+```sh
+tl-run.sh add-farewell         # grill → (stop, or auto-advance) → brief → spawn, then returns
+# ... tl-watch wakes you when the task is ready ...
+tl-run.sh add-farewell         # resumes at the gate → deliver
+```
+
+It holds **no state of its own**: the current stage is recomputed every run from the spec, brief,
+task meta, `tl-state`, and findings. So it is killable and resumable — re-running it, or dropping
+back to the individual `tl-*` commands above, always continues from where the pipeline actually is.
+`tl-run` is a thin convenience over those commands, **not** a replacement; the manual path stays the
+fallback when you want finer control.
+
+> **Multi-project instances.** `tl-run` takes only a slug, so it leans on `tl-spawn`'s resolution to
+> pick the project — the sole registered one, or the spec's `project` field. If you manage more than
+> one project, pin it first with `tl-spec.sh set tl-<slug> project <name>` (otherwise the spawn stage
+> refuses, naming the missing piece), or dispatch that one by hand with
+> `tl-spawn.sh tl-<slug> --project <path> --project-name <name>`.
 
 ## Ledgers
 

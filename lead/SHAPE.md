@@ -69,16 +69,56 @@ stable core of rules that keep firing = judgment captured; a pile of once-used r
 engineer with a notebook (risk 2). Kept by hand for now (code-free track); the reuse count feeds the
 D13 kill-gate alongside `tl-metric` time. No script until there are rules to count — YAGNI.
 
-## Curation (E6.6)
+## Consolidation (E6.6) — the promote-and-prune routine
 
-- **Prune low-reuse rules.** After a handful of grills, a rule still at `hits: 1` is a one-off, not a
-  prior. Cut it. This is the junk-drawer defense accretion demands (D4). Owner-run; no cadence is
-  fixed yet (open question §8.2).
-- **Brownfield-check every new prior before it ships (§2.4).** Minimalist priors — fewest files,
-  shortest diff, no unrequested abstractions — are strong greenfield advice and frequently *wrong*
-  on brownfield, where consistency with an existing verbose pattern beats local minimalism and a
-  mature codebase's conventions *are* abstractions someone requested years ago. Before a prior lands,
-  ask: does it still hold on a six-year-old shared repo? If not, scope it with an intensity level.
+`lead/` grows toward whatever broke most recently; left alone it overfits, and a pile of once-used
+rules is a generic engineer with a notebook (risk 2), not captured judgment. Consolidation is the
+habit that fights that. It is **owner-run — or run by an agent whose proposal the owner reviews —
+never on a timer and never a silent rewrite.** An agent may *propose* cuts and merges; only the
+owner commits them.
+
+**Trigger (cadence, not a clock).** Run a pass when any of these fires:
+- ~10 owner overrides have accrued since the last pass (`tl-metric outcome`), or
+- a D13 kill-criterion checkpoint is due, or
+- `AGENTS.md` or any single `lead/` file crosses the context-budget ceiling in `AGENTS.md` — a file
+  over the line is due for a pass, not for more appending.
+
+**Four tiers** — where a pass moves content, using files we already keep:
+- **Raw** — individual override corrections and freshly captured questions, as they land.
+- **Episodic** — the same, grouped by the task/theme that produced them (each rule's `<!-- born: … -->`
+  trail already records that grouping).
+- **Semantic** — the durable rule several raw entries imply, written into `principles.md` /
+  `review-rubric.md`.
+- **Procedural** — a question asked so often it becomes a standing check in `questions.md`.
+
+**Every pass does three things — and deletion is the point:**
+1. **Promote** raw entries that recur into one semantic rule (bump `hits`; add the reuse to its
+   `born:` trail).
+2. **Merge** duplicates — two rules saying one thing collapse to one; the weaker `hits` folds in.
+3. **Delete** entries that no longer earn their place. After a handful of grills a rule still at
+   `hits: 1` is a one-off, not a prior (junk-drawer defense, D4). An entry kept out of habit *is* the
+   failure mode — cutting it is the work, not a loss.
+
+**Brownfield-check every surviving prior (§2.4).** Minimalist priors — fewest files, shortest diff,
+no unrequested abstractions — are strong greenfield advice and frequently *wrong* on brownfield,
+where consistency with an existing verbose pattern beats local minimalism and a mature codebase's
+conventions *are* abstractions someone requested years ago. Ask: does it still hold on a six-year-old
+shared repo? If not, scope it with an intensity level.
+
+## Adding a rule — the contradiction check (§2.6, the learning loop)
+
+The loop appends a new prior on every owner override. Appending blindly lets two rules drift into
+conflict, both live at once. So **before any `lead/` diff is proposed, the proposing agent first reads
+the target file and compares the new rule against the ones already there** — a plain read-and-compare
+against `principles.md` / `review-rubric.md` / `questions.md`, no similarity engine. When in doubt,
+flag: a false positive costs the owner ten seconds; a missed contradiction costs a silent
+inconsistency.
+
+On a conflict, surface **both rules together** for the owner to reconcile exactly one way:
+- **keep** — the existing rule stands; drop the new one.
+- **merge** — fold both into one (union the ladders, widen the *Not when*).
+- **supersede** — the new rule replaces the old, and **the superseded rule is removed, not left beside
+  its replacement** — two rules with one dead is the drift this check exists to stop.
 
 ## Outcome data (E6.4 / E6.5)
 

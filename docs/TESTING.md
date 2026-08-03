@@ -118,6 +118,15 @@ any question the model leaves `open`, then checks the delivered change). It **sk
 (exit 0) if opencode or the model isn't installed. The four demo smokes above stay the fast,
 deterministic suite; this is the real-local-agent check.
 
+> **If a local-model run hangs, it's usually opencode, not TechLead.** `opencode run` can wedge:
+> the process sits holding `~/.local/share/opencode/opencode.db` **without ever loading the model**
+> (tell-tale: `ollama ps` shows nothing loaded and CPU is ~0%, yet the grill/worker never returns).
+> A stale/orphaned `opencode` process from an earlier aborted run keeps the shared backend wedged,
+> so *new* runs block indefinitely too. Recover with `pkill -f opencode` (clear the orphan), then
+> retry — or switch to the Claude Code harness (below), which drives the same pipeline reliably.
+> The `bin/` scripts run through setup (`tl-init`/`tl-onboard`) fine regardless; the hang is below
+> the `TL_WORKER_CMD`/`TL_GRILL_CMD` seam.
+
 ### Manual — drive either harness yourself
 
 To exercise a *real* agent end to end by hand. Two harnesses are wired; pick one:

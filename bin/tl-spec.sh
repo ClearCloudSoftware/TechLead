@@ -13,7 +13,9 @@ case "$sub" in
   path) echo "$spec" ;;
   init) # id slug title [bodyfile]
     slug="${3:?}"; title="${4:?}"; body="${5:-/dev/null}"; mkdir -p "$TL_DATA/$id"
-    { printf -- '---\nid: %s\nbacklog: %s\ntitle: %s\nstate: drafted\ngrilled_at: %s\n---\n' \
+    # outcome: — lite outcome note (E6.5, D11), empty until a revert/hotfix; hand-filled citing the
+    # q# that missed it:  tl-spec set <id> outcome "q3 missed the auth edge case — reverted".
+    { printf -- '---\nid: %s\nbacklog: %s\ntitle: %s\nstate: drafted\ngrilled_at: %s\noutcome:\n---\n' \
         "$id" "$slug" "$title" "$(date -u +%Y-%m-%d)"
       printf '# %s\n\n_Backlog item:_ `%s`\n\n' "$title" "$slug"
       cat "$body" 2>/dev/null || true

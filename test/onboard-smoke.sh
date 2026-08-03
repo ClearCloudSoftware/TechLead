@@ -23,7 +23,9 @@ grep -q 'opencode-worker' "$TL_CONFIG" || fail "instance.env did not record the 
 # W1 round-trip: a fresh shell with no TL_WORKER_CMD picks it up from the file
 ( unset TL_WORKER_CMD; . "$BIN/tl-common.sh"; case "${TL_WORKER_CMD:-}" in *opencode-worker.sh) : ;; *) exit 3;; esac ) \
   || fail "tl-common did not auto-load TL_WORKER_CMD from instance.env"
-[ -e "$REPO/lead/decisions" ] && fail "tl-init seeded the REAL lead/ during the smoke (should have declined)"
+# The real lead/ now holds genuine grilled content (principles.md, etc.), so "a file exists" can't
+# prove seeding ran. tl-init's stubs carry a unique marker — assert none landed in the real lead/.
+if grep -rq 'stub (tl-init)' "$REPO/lead/" 2>/dev/null; then fail "tl-init seeded the REAL lead/ during the smoke (should have declined)"; fi
 echo "  ok — instance.env written and auto-loaded; real lead/ untouched"
 
 echo "== W3: tl-onboard registers a brownfield repo + baseline =="

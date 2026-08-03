@@ -41,7 +41,7 @@ if tl_confirm SEED_LEAD "scaffold the lead/ file skeleton (empty stubs)" "y"; th
   [ -e "$L/decisions/.gitkeep" ] || : > "$L/decisions/.gitkeep"
   for f in principles review-rubric delegation escalation questions voice; do
     [ -f "$L/$f.md" ] && continue
-    printf '# %s\n\n<!-- stub (tl-init). Fill from real grills; do not seed borrowed judgment (lead/README). -->\n' "$f" > "$L/$f.md"
+    printf '# %s\n\n<!-- stub (tl-init). Shape: lead/SHAPE.md. Fill from real grills; do not seed borrowed judgment (lead/README). -->\n' "$f" > "$L/$f.md"
   done
   tl_log "seeded lead/ skeleton (stubs — fill questions.md before grilling; see docs/tutorial-todo-app.md)"
 fi

@@ -6,7 +6,8 @@ prompt files — no daemon, no SQLite, no LLM in the supervision loop.
 
 - **`AGENTS.md`** — the operating contract. Start here.
 - **`bin/tl-*.sh`** — the deterministic toolbelt.
-- **`lead/`** — the judgment layer (Phase 0 stub; the actual product).
+- **`lead/`** — the judgment layer, the actual product. No longer a stub: architecture priors in
+  `lead/principles.md` (seeded from real grills, with reuse counters) + the required shape in `lead/SHAPE.md`.
 
 ## Phase 0 (working)
 

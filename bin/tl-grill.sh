@@ -64,9 +64,17 @@ id="tl-$(slugify "$slug")"
 tl_log "grill: $id — inference pass over lead/questions.md"
 
 : "${TL_GRILL_CMD:?tl: no grill driver — set TL_GRILL_CMD (e.g. adapters/claude-grill.sh)}"
+# Grill grounding wire (brief D4): if this spec targets a graphed project, hand the driver the seam so
+# it MAY ask the graph for structural facts. Question *phrasing* stays semantic policy in
+# lead/questions.md — this only supplies facts to ask about. Empty vars when there is no graph.
+gsproj="$("$BIN/tl-spec.sh" get "$id" project 2>/dev/null || true)"; gscmd=""; gsname=""
+if [ -n "$gsproj" ] && "$BIN/tl-search.sh" status "$gsproj" 2>/dev/null | grep -q 'built='; then
+  gscmd="$BIN/tl-search.sh"; gsname="$gsproj"; tl_log "grill: $gsproj code graph available to the driver (tl-search)"
+fi
 # driver emits one line per question:  qid <TAB> answer_state <TAB> source <TAB> text
 TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
 TL_QUESTIONS="$TL_HOME/lead/questions.md" TL_DECISIONS="$TL_HOME/lead/decisions" \
+TL_SEARCH_CMD="$gscmd" TL_SEARCH_PROJECT="$gsname" \
   $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text; do
     [ -n "$qid" ] || continue
     case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)

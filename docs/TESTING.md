@@ -13,7 +13,7 @@ asserts the single most important invariant in the system directly.
 
 ```sh
 cd /path/to/techlead
-for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke tl-top-smoke; do
+for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke tl-top-smoke search-smoke; do
   ./test/$t.sh && echo "$t OK" || { echo "$t FAILED"; break; }
 done
 ```
@@ -28,6 +28,7 @@ Or individually:
 ./test/onboard-smoke.sh  # the setup wizards (tl-init / tl-onboard / tl-new)
 ./test/run-smoke.sh      # tl-spawn arg resolution + the tl-run pipeline driver
 ./test/tl-top-smoke.sh   # the tl-top fleet-model builder (pure, no terminal, no instance)
+./test/search-smoke.sh   # the tl-search code-graph seam (stub graphify, out-of-tree + fail-closed)
 ```
 
 Each prints its stages and ends with a single `PASS: ...` line and exit code 0. Any `FAIL: ...`
@@ -105,6 +106,16 @@ with no curses calls, and this smoke asserts it directly via `tl-top --selftest`
   working → quiet). The curses layer is then a thin, dumb render of this tested model.
 
 It needs no instance and no `TL_HOME` — the selftest builds its own throwaway fixture in `tmp`.
+
+### `search-smoke.sh` — the code-graph seam (`tl-search`)
+Drives `tl-search` against a **stub `graphify` on `PATH`** (like `demo-worker` stands in for a real
+agent), so it's deterministic and offline:
+- A build (both `ast` and `semantic`) lands the graph **only under gitignored `data/`** and **never**
+  writes `graphify-out/` into the managed repo — the load-bearing §3.16 cache-discipline invariant.
+- `query`/`explain`/`path` pass through to the tool; `status` reports mode/build/stale.
+- **Refresh** rebuilds an `ast` graph in place but marks a `semantic` one `STALE` (never auto-spends an LLM on a land).
+- **Fail-closed:** an `off` project, a missing graph, and an absent `graphify` each exit non-zero so the caller greps.
+- **Encapsulation:** no `bin/` script other than the adapter names `graphify`.
 
 ## Test fixtures (the fake workers/drivers)
 

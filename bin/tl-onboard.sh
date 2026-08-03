@@ -31,6 +31,11 @@ branch="$(tl_ask BRANCH "default branch (merge target)" "$(det branch)")"
 test_command="$(tl_ask TEST_COMMAND "test command — must print failing-test ids, one per line" "$(det test-command)")"
 max_files="$(tl_ask MAX_FILES "max files changed before it becomes an ask-user finding" "25")"
 danger="$(tl_ask DANGER_PATHS "danger-path globs (space-separated), touching one escalates" "$(det danger-paths)")"
+# Code-graph build mode (tl-search seam, §3.11): off (grep only) | ast (no-LLM structure) |
+# semantic (LLM-enriched). Opt-in — a graph earns its build cost only once discovery is a measured
+# drag, so the default is off. tl: default off; flip when most onboards want a graph.
+graph_mode="$(tl_choose GRAPH_MODE "code graph (off | ast=no-LLM structure | semantic=LLM-enriched)" off off ast semantic)"
+case "$graph_mode" in off|ast|semantic) ;; *) tl_die "graph_mode must be off|ast|semantic (got: $graph_mode)";; esac
 
 # Register through the single owner (§3.12) — never a direct .conf write.
 pj() { "$BIN/tl-project.sh" set "$name" "$@"; }
@@ -40,6 +45,7 @@ pj default_branch "$branch"
 pj max_files_changed "$max_files"
 [ -n "$test_command" ] && pj test_command "$test_command"
 [ -n "$danger" ]       && pj danger_paths "$danger"
+pj graph_mode "$graph_mode"
 
 # Baseline — the completion criterion for a brownfield `change` (§2.7). Only with an explicit OK to
 # run the tests, and only if a test command exists. A recorded baseline promotes readiness to
@@ -69,7 +75,9 @@ if tl_confirm SURVEY "dispatch the survey plan task now (writes the repo's AGENT
     printf '# Survey: %s\n\n' "$name"
     printf 'Produce the onboarding docs for this repo (%s) — owner-only, zero blast radius:\n' "$path"
     printf -- '- **AGENTS.md** — layout map, how to run tests, current *and* superseded conventions, danger zones.\n'
-    printf -- '- **CONTEXT.md** — the domain glossary/vocabulary that lets one word replace a paragraph.\n\n'
+    printf -- '- **CONTEXT.md** — the domain glossary/vocabulary that lets one word replace a paragraph.\n'
+    [ "$graph_mode" != off ] && printf -- '- **code graph** — build it: `%s/bin/tl-search.sh build %s` (mode: %s). Codebase memory, not lead/ judgment — query it, never copy it into lead/.\n' "$TL_HOME" "$name" "$graph_mode"
+    printf '\n'
     printf 'Read before writing. Do not touch application code — this is a plan task (a written report).\n'
   } > "$brief"
   "$BIN/tl-spawn.sh" --id "$sid" --project "$path" --project-name "$name" --kind plan --brief "$brief"

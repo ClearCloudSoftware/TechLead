@@ -4,6 +4,13 @@
 /config/
 /projects/     # managed repo clones — the lead is read-only over these (§3.2)
 
+# Code-graph artifacts (tl-search/graphify): big and rebuilt often. They MUST stay out of git AND out
+# of the harness-cached workspace — every rebuild would otherwise bust the prompt cache at cache-write
+# rates (§3.16, the largest unclaimed token win). They live under /data/ (ignored above); these lines
+# are the explicit rule, and a guard if this repo ever graphs itself.
+graphify-out/
+*.graph/
+
 # python bytecode (tl-top) — build junk
 __pycache__/
 *.pyc

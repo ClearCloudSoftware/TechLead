@@ -24,12 +24,15 @@ case "$mode" in
       || tl_die "not fast-forwardable into $defbranch — rebase the worker branch first"
     tl_meta_set "$id" delivered "ff-merge:$defbranch"
     tl_log "delivered $id — fast-forward merged $branch into $defbranch"
+    "$BIN/tl-search.sh" refresh "$pname" >&2 || true   # brief D2 refresh trigger: landed code moved the map (fail-open, no-LLM)
     ;;
   pr)
     git -C "$wt" push -u origin "$branch" >/dev/null 2>&1 || tl_die "push of $branch failed"
     url="$(cd "$wt" && gh pr create --fill --head "$branch" 2>/dev/null)" || tl_die "gh pr create failed"
     tl_meta_set "$id" pr "$url"; tl_meta_set "$id" delivered "pr:$url"
     tl_log "delivered $id — PR $url"
+    # tl: graph refresh waits for the PR to actually merge (not tracked in Phase 0) — refresh manually
+    # (tl-search build "$pname") or on the next survey, so the map never reflects unmerged code.
     ;;
   *) tl_die "unknown delivery mode: $mode" ;;
 esac

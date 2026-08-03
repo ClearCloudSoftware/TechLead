@@ -1,0 +1,474 @@
+#!/usr/bin/env python3
+"""tl-top — read-only fleet TUI (§3.5 viewer).
+
+Render, never mutate. It reads current state and displays it; every consequence is a
+shell-out to the real tl-* command, run full-screen in the normal terminal, so the
+auditable command path — and its refusals — still own the decision. Killing tl-top at
+any point (including mid-action) leaves system state correct: the shelled command ran
+or it didn't, on its own terms. Stdlib curses only (ADR-002); holds no state — every
+refresh recomputes the fleet from tl-state and the files.
+
+The fleet-model builder (build_fleet_model) is a PURE function with no curses calls, so
+it is testable without a terminal: `tl-top --selftest` asserts it against fixture state.
+"""
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Row:
+    id: str
+    kind: str
+    project: str
+    state: str          # authoritative runtime state, from tl-state (never the log tail)
+    waiting_on: str     # the "who needs me" column; "" when working-and-fine
+    rank: int           # sort/visual priority; lower = louder (stop conditions on top)
+    findings: list = field(default_factory=list)
+
+
+# Visual/sort priority: lower = louder. Unresolved gate findings are the single most important
+# stop (the decision the whole system exists to slow down), so they rank above everything (0).
+# working/paused deliberately recede. The exact internal order is pinned by the selftest.
+_RANK = {
+    "needs-decision": 1,   # a worker is waiting on the owner
+    "blocked": 2,          # can't proceed
+    "failed": 3,           # worker died — needs a look
+    "done": 4,             # deliverable ready — owner should review / deliver / approve
+    "paused": 5,
+    "working": 6,
+}
+
+
+def _base_state(state):
+    return state.split(":", 1)[0]   # "paused:reason" -> "paused"
+
+
+def rank(state, has_unresolved_findings):
+    if has_unresolved_findings:
+        return 0
+    return _RANK.get(_base_state(state), 7)   # unknown/other sinks to the bottom
+
+
+def waiting_on(state, n_unresolved):
+    """The 'who needs me' column. '' means working-and-fine — nothing needed."""
+    if n_unresolved:
+        return "%d finding(s)" % n_unresolved
+    return {
+        "needs-decision": "decision",
+        "blocked": "blocked",
+        "failed": "failed",
+        "done": "review",
+        "paused": "paused",
+        "working": "",
+    }.get(_base_state(state), state)
+
+
+def read_meta(path):
+    """Parse state/<id>.meta (key=value per line). Mirrors tl_meta_get; last value wins."""
+    meta = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                k, sep, v = line.partition("=")
+                if sep:
+                    meta[k.strip()] = v.rstrip("\n")
+    except OSError:
+        pass
+    return meta
+
+
+def read_findings(path):
+    """data/<id>/findings.json -> list. Missing or half-written (mid-gate) -> [] (never crash)."""
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def project_name(meta):
+    return meta.get("pname") or os.path.basename(meta.get("project", "").rstrip("/")) or "?"
+
+
+def build_fleet_model(state_dir, data_dir, state_of):
+    """Pure: fixture state -> priority-sorted rows. state_of(id)->state word is injected so this
+    needs no subprocess/terminal (the curses layer passes the real tl-state shell-out)."""
+    rows = []
+    for path in sorted(glob.glob(os.path.join(state_dir, "*.meta"))):
+        tid = os.path.basename(path)[:-len(".meta")]
+        meta = read_meta(path)
+        if meta.get("state") == "done":
+            continue   # torn down (mirrors tl-watch active_ids) — no longer in the fleet
+        rt = state_of(tid)   # authoritative current state (tl-state), never the status-log tail
+        findings = read_findings(os.path.join(data_dir, tid, "findings.json"))
+        n_unresolved = sum(1 for f in findings if f.get("resolved") in (None, "fix"))
+        rows.append(Row(
+            id=tid,
+            kind=meta.get("kind", "?"),
+            project=project_name(meta),
+            state=rt,
+            waiting_on=waiting_on(rt, n_unresolved),
+            rank=rank(rt, n_unresolved > 0),
+            findings=findings,
+        ))
+    rows.sort(key=lambda r: (r.rank, r.id))
+    return rows
+
+
+# --------------------------------------------------------------------------- selftest
+def _selftest():
+    fail = []
+    def check(cond, msg):
+        if not cond:
+            fail.append(msg)
+
+    tmp = tempfile.mkdtemp(prefix="tl-top-selftest.")
+    state_dir = os.path.join(tmp, "state")
+    data_dir = os.path.join(tmp, "data")
+    os.makedirs(state_dir)
+    os.makedirs(data_dir)
+    metas = {
+        "tl-a": "kind=change\npname=proj1\nproject=/x/proj1\nstate=working\n",
+        "tl-b": "kind=plan\npname=proj1\nstate=working\n",
+        "tl-c": "kind=change\npname=proj2\nstate=working\n",
+        "tl-d": "kind=plan\npname=proj1\nstate=done\n",   # torn down -> excluded
+        "tl-e": "kind=change\npname=proj2\nstate=working\n",
+        "tl-f": "kind=plan\npname=proj1\nstate=working\n",
+        "tl-g": "kind=change\npname=proj3\nstate=working\n",
+        "tl-h": "kind=plan\npname=proj3\nstate=working\n",
+        "tl-i": "kind=answer\npname=proj3\nstate=working\n",
+    }
+    for k, v in metas.items():
+        with open(os.path.join(state_dir, k + ".meta"), "w") as f:
+            f.write(v)
+    os.makedirs(os.path.join(data_dir, "tl-a"))
+    with open(os.path.join(data_dir, "tl-a", "findings.json"), "w") as f:
+        json.dump([
+            {"id": "f1", "class": "ask-user", "rule": "test-regression", "detail": "x", "resolved": None},
+            {"id": "f2", "class": "ask-user", "rule": "scope-cap", "detail": "y", "resolved": "fix"},
+            {"id": "f3", "class": "ask-user", "rule": "danger", "detail": "z", "resolved": "approve"},
+        ], f)
+
+    runtime = {"tl-a": "done", "tl-b": "needs-decision", "tl-c": "working",
+               "tl-e": "failed", "tl-f": "done", "tl-g": "paused",
+               "tl-h": "paused:owner-review", "tl-i": "unknown"}
+    model = build_fleet_model(state_dir, data_dir, lambda i: runtime.get(i, "unknown"))
+
+    ids = [r.id for r in model]
+    check(ids == ["tl-a", "tl-b", "tl-e", "tl-f", "tl-g", "tl-h", "tl-c", "tl-i"],
+          "priority order / torn-down exclusion wrong: %r" % ids)
+    by = {r.id: r for r in model}
+    if by.get("tl-a"):
+        a = by["tl-a"]
+        check(a.rank == 0, "unresolved-findings task must rank top, got %r" % a.rank)
+        check(a.waiting_on == "2 finding(s)", "waiting_on for findings: %r" % a.waiting_on)
+        check(a.kind == "change" and a.project == "proj1", "kind/project mapping")
+        check(len(a.findings) == 3, "all findings attached to the row")
+    check(bool(by.get("tl-b")) and by["tl-b"].waiting_on == "decision", "needs-decision -> 'decision'")
+    check(bool(by.get("tl-e")) and by["tl-e"].waiting_on == "failed", "failed -> 'failed'")
+    check(bool(by.get("tl-f")) and by["tl-f"].waiting_on == "review", "done -> 'review'")
+    check(bool(by.get("tl-c")) and by["tl-c"].waiting_on == "", "working -> quiet ('')")
+    check(bool(by.get("tl-g")) and by["tl-g"].waiting_on == "paused" and by["tl-g"].rank == 5,
+          "paused recedes (rank 5)")
+    check(bool(by.get("tl-h")) and by["tl-h"].waiting_on == "paused",
+          "paused:reason -> base 'paused'")
+    check(bool(by.get("tl-i")) and by["tl-i"].waiting_on == "unknown" and by["tl-i"].rank == 7,
+          "unknown state sinks to the bottom")
+    check(build_fleet_model(state_dir + "-nope", data_dir, lambda i: "working") == [],
+          "missing/empty state dir -> []")
+
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
+    if fail:
+        for m in fail:
+            print("FAIL:", m)
+        sys.exit(1)
+    print("PASS: tl-top fleet model (priority order, exclusion, waiting-on)")
+
+
+# ----------------------------------------------------------------- instance + shell-outs
+BIN = os.path.dirname(os.path.abspath(__file__))
+_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")   # ids come from filenames — validate before use
+
+
+def _tl_home():
+    return os.environ.get("TL_HOME", "")
+
+
+def _guard():
+    """Same capability guard as tl-common.sh (§3.9): only operate inside a real instance."""
+    home = _tl_home()
+    if not home:
+        sys.exit("tl-top: refusing — TL_HOME is not set (capability guard, §3.9)")
+    if not os.path.isfile(os.path.join(home, "AGENTS.md")):
+        sys.exit("tl-top: refusing — TL_HOME (%s) is not a TechLead instance (no AGENTS.md)" % home)
+
+
+def _state_paths():
+    home = _tl_home()
+    return (os.environ.get("TL_STATE") or os.path.join(home, "state"),
+            os.environ.get("TL_DATA") or os.path.join(home, "data"))
+
+
+def _run_capture(argv):
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        return r.stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def tl_state(tid):
+    """Authoritative current state (§3.4) — the injected state_of for the real fleet."""
+    if not _ID_RE.match(tid):
+        return "unknown"
+    return _run_capture([os.path.join(BIN, "tl-state.sh"), tid]).strip() or "unknown"
+
+
+def tl_peek(tid, n):
+    if not _ID_RE.match(tid):
+        return ""
+    return _run_capture([os.path.join(BIN, "tl-peek.sh"), tid, str(n)])
+
+
+def tl_spec_path(tid):
+    if not _ID_RE.match(tid):
+        return ""
+    return _run_capture([os.path.join(BIN, "tl-spec.sh"), "path", tid]).strip()
+
+
+# ----------------------------------------------------------------------------- curses UI
+import curses  # noqa: E402  (kept below the pure/testable core; --selftest never initscr's)
+
+CP_LOUD, CP_STUCK, CP_READY, CP_QUIET = 1, 2, 3, 4
+
+
+def _interval_ms():
+    try:
+        return max(200, int(float(os.environ.get("TL_TOP_INTERVAL", "2")) * 1000))
+    except ValueError:
+        return 2000
+
+
+def _rank_attr(rank_val):
+    if not curses.has_colors():
+        return curses.A_BOLD if rank_val <= 3 else curses.A_NORMAL
+    if rank_val <= 1:                       # findings / needs-decision — act now
+        return curses.color_pair(CP_LOUD) | curses.A_BOLD
+    if rank_val <= 3:                       # blocked / failed — stuck
+        return curses.color_pair(CP_STUCK) | curses.A_BOLD
+    if rank_val == 4:                       # done — ready for review
+        return curses.color_pair(CP_READY)
+    return curses.color_pair(CP_QUIET) | curses.A_DIM   # working / paused — recede
+
+
+def _addln(win, y, x, s, attr=0):
+    h, w = win.getmaxyx()
+    if 0 <= y < h and x < w:
+        try:
+            win.addnstr(y, x, s, w - x - 1, attr)   # -1 dodges the bottom-right-corner error
+        except curses.error:
+            pass
+
+
+def _index_of(model, sid):
+    for i, r in enumerate(model):
+        if r.id == sid:
+            return i
+    return 0
+
+
+def _footer(win):
+    h, w = win.getmaxyx()
+    _addln(win, h - 1, 0, ("  ↑/↓ move   enter detail   p peek   r run   g gate   q quit"
+                           "    (r/g confirm, then drop into the real command)").ljust(w),
+           curses.A_REVERSE)
+
+
+def _draw(win, model, sel_idx, expanded, data_dir):
+    win.erase()
+    h, w = win.getmaxyx()
+    _addln(win, 0, 0, " tl-top — fleet (read-only; every action shells out to a tl-* command) ".ljust(w),
+           curses.A_BOLD | curses.A_REVERSE)
+    _addln(win, 1, 0, "%-16s %-7s %-14s %-12s %s" % ("TASK", "KIND", "STATE", "PROJECT", "WAITING ON"),
+           curses.A_UNDERLINE)
+    if not model:
+        _addln(win, 3, 0, "no active tasks — the fleet is idle.")
+        _footer(win)
+        win.noutrefresh()
+        curses.doupdate()
+        return
+
+    table_h = (h - 3) if not expanded else max(3, (h - 3) // 2)
+    top = max(0, sel_idx - table_h + 1) if sel_idx >= table_h else 0
+    for i in range(top, min(len(model), top + table_h)):
+        r = model[i]
+        line = "%-16s %-7s %-14s %-12s %s" % (
+            r.id[:16], r.kind[:7], r.state[:14], r.project[:12], r.waiting_on)
+        attr = _rank_attr(r.rank)
+        if i == sel_idx:
+            attr |= curses.A_REVERSE
+        _addln(win, 2 + (i - top), 0, line.ljust(w), attr)
+
+    if expanded:
+        _draw_detail(win, model[sel_idx], 2 + table_h, h, data_dir)
+    _footer(win)
+    win.noutrefresh()
+    curses.doupdate()
+
+
+def _draw_detail(win, row, y, h, data_dir):
+    _addln(win, y, 0, ("── detail: %s ──" % row.id).ljust(80), curses.A_BOLD)
+    y += 1
+    brief = os.path.join(data_dir, row.id, "brief.md")
+    _addln(win, y, 0, "spec:  " + (tl_spec_path(row.id) or "(none)")); y += 1
+    _addln(win, y, 0, "brief: " + brief + ("" if os.path.exists(brief) else "  (none)")); y += 1
+
+    if row.findings:
+        n_open = sum(1 for f in row.findings if f.get("resolved") in (None, "fix"))
+        _addln(win, y, 0, "findings (%d, %d open):" % (len(row.findings), n_open), curses.A_BOLD)
+        y += 1
+        for f in row.findings:
+            open_ = f.get("resolved") in (None, "fix")
+            mark = "!" if open_ else "x"
+            _addln(win, y, 2, "%s [%s] %s: %s"
+                   % (mark, f.get("class", "?"), f.get("rule", "?"), f.get("detail", "")),
+                   curses.A_BOLD if open_ else curses.A_DIM)
+            y += 1
+
+    if y < h - 2:
+        _addln(win, y, 0, "peek (snapshot, re-read each refresh):", curses.A_UNDERLINE)
+        y += 1
+        remaining = (h - 2) - y
+        if remaining > 0:
+            for ln in tl_peek(row.id, remaining).splitlines()[-remaining:]:
+                _addln(win, y, 2, ln)
+                y += 1
+
+
+def _suspend(win, fn):
+    """The curses handoff: release the terminal, run fn full-screen, restore + repaint."""
+    curses.def_prog_mode()
+    curses.endwin()
+    try:
+        fn()
+    finally:
+        curses.reset_prog_mode()
+        win.refresh()
+
+
+def _shell_out(win, argv):
+    def go():
+        try:
+            subprocess.call(argv)
+        except OSError as e:
+            print("\ntl-top: could not run %s (%s)" % (argv[0], e))
+            print("        (if this is tl-run, feat/tl-run may not be merged into this branch yet)")
+            try:
+                input("[enter to return] ")
+            except EOFError:
+                pass
+    _suspend(win, go)
+
+
+def _peek_fullscreen(win, tid):
+    if not _ID_RE.match(tid):
+        return
+
+    def go():
+        import shlex
+        p1 = subprocess.Popen([os.path.join(BIN, "tl-peek.sh"), tid, "500"], stdout=subprocess.PIPE)
+        try:
+            pager = subprocess.Popen(shlex.split(os.environ.get("PAGER") or "less"), stdin=p1.stdout)
+            p1.stdout.close()
+            pager.wait()
+        except OSError:                        # no pager on PATH — dump + wait
+            sys.stdout.write(p1.stdout.read().decode("utf-8", "replace"))
+            try:
+                input("\n[enter to return] ")
+            except EOFError:
+                pass
+        p1.wait()
+    _suspend(win, go)
+
+
+def _confirm(win, msg):
+    """A deliberate two-step for consequences: press the key, then confirm. Never a bare keypress,
+    and never a bulk 'approve all' — the real approve/skip/fix happens inside the shelled command."""
+    h, w = win.getmaxyx()
+    _addln(win, h - 1, 0, (" " + msg + "   [y/N] ").ljust(w), curses.A_REVERSE | curses.A_BOLD)
+    win.noutrefresh()
+    curses.doupdate()
+    win.timeout(-1)                            # block for the decision
+    ch = win.getch()
+    win.timeout(_interval_ms())
+    return ch in (ord("y"), ord("Y"))
+
+
+def _loop(win):
+    curses.curs_set(0)
+    if curses.has_colors():
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(CP_LOUD, curses.COLOR_RED, -1)
+        curses.init_pair(CP_STUCK, curses.COLOR_YELLOW, -1)
+        curses.init_pair(CP_READY, curses.COLOR_GREEN, -1)
+        curses.init_pair(CP_QUIET, curses.COLOR_CYAN, -1)
+    win.timeout(_interval_ms())
+    state_dir, data_dir = _state_paths()
+    model = build_fleet_model(state_dir, data_dir, tl_state)
+    selected_id = model[0].id if model else None
+    expanded = False
+
+    while True:
+        sel_idx = _index_of(model, selected_id)
+        selected_id = model[sel_idx].id if model else None
+        _draw(win, model, sel_idx, expanded, data_dir)
+        try:
+            ch = win.getch()
+        except KeyboardInterrupt:
+            return
+        if ch == -1:                                   # timer tick — recompute the fleet
+            model = build_fleet_model(state_dir, data_dir, tl_state)
+        elif ch in (ord("q"), ord("Q")):
+            return
+        elif ch in (curses.KEY_DOWN, ord("j")) and model:
+            selected_id = model[min(sel_idx + 1, len(model) - 1)].id
+        elif ch in (curses.KEY_UP, ord("k")) and model:
+            selected_id = model[max(sel_idx - 1, 0)].id
+        elif ch in (curses.KEY_ENTER, 10, 13):
+            expanded = not expanded
+        elif ch == ord("p") and model:
+            _peek_fullscreen(win, model[sel_idx].id)
+        elif ch == ord("r") and model:
+            row = model[sel_idx]
+            slug = row.id[len("tl-"):] if row.id.startswith("tl-") else row.id
+            # tl: id->slug by stripping the tl- prefix (tl-run makes id = "tl-"+slug). Fine for
+            #     tl-run-born tasks; store slug in meta if directly-spawned ids ever need it.
+            if _confirm(win, "Run pipeline: tl-run %s  (its own approve/reject prompts)" % slug):
+                _shell_out(win, [os.path.join(BIN, "tl-run.sh"), slug])
+            model = build_fleet_model(state_dir, data_dir, tl_state)
+        elif ch == ord("g") and model:
+            row = model[sel_idx]
+            if _confirm(win, "Resolve gate: tl-deliver %s  (gate prompts approve/skip/fix per finding)" % row.id):
+                _shell_out(win, [os.path.join(BIN, "tl-deliver.sh"), row.id])
+            model = build_fleet_model(state_dir, data_dir, tl_state)
+
+
+def run():
+    _guard()
+    curses.wrapper(_loop)
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        _selftest()
+    else:
+        run()

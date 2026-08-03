@@ -227,6 +227,22 @@ The watcher costs **zero tokens while idle** (it polls with `kill -0`/`stat`, no
 worker needs a decision it escalates in the terminal with a stated default; if you don't answer,
 the default fires and is logged (park-don't-block).
 
+**A live fleet view (convenience).** `tl-top` is a read-only `curses` dashboard over `tl-state` —
+one row per active task, refreshing on a timer (`TL_TOP_INTERVAL`, default 2s) and on keypress,
+with the **stop-condition** tasks (needs-decision, unresolved gate findings, blocked, failed)
+sorted loud to the top so a glance answers "who needs me"; working/paused tasks recede.
+
+```sh
+tl-top                 # live read-only fleet view; q to quit
+```
+
+It **renders, never mutates.** Navigation is instant; the only keys with a consequence shell out to
+a real command — `p` → `tl-peek`, `r` → `tl-run`, `g` → `tl-deliver` — and `r`/`g` each require a
+confirm, then drop you into that command's own approve/skip/fix prompts (there is no bulk-approve,
+no single-keystroke merge). It is **never load-bearing**: if `tl-top` is broken or absent, every
+command above is the fallback, and killing it — even mid-action — changes nothing (the shelled
+command ran or didn't, on its own terms; `tl-top` holds no state).
+
 ### 6a. Approve a `plan`
 
 ```sh

@@ -12,6 +12,7 @@ worker branches `tl/<id>` · log/status lines `tl:`.
 ## Where things live — read the owner, never re-derive
 - `lead/` — the judgment layer: *which* work, to *whose* standard, escalated *when*. (Phase 0: stub; rules accrete from real feature grills.)
 - `bin/` — the deterministic toolbelt. No LLM in these. Mechanics only.
+- `bin/tl-search.sh` — query a graphed project's code structure (a seam over Graphify). Codebase memory, never `lead/`.
 - `.agents/skills/` — procedures loaded on demand.
 - `data/` — durable records (specs, briefs, reports). `state/` — volatile runtime. `config/` — local choices.
 

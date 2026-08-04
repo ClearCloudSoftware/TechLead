@@ -13,7 +13,7 @@ asserts the single most important invariant in the system directly.
 
 ```sh
 cd /path/to/techlead
-for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke tl-top-smoke; do
+for t in smoke watch-smoke change-smoke grill-smoke onboard-smoke run-smoke tl-top-smoke scrub-smoke; do
   ./test/$t.sh && echo "$t OK" || { echo "$t FAILED"; break; }
 done
 ```
@@ -28,6 +28,7 @@ Or individually:
 ./test/onboard-smoke.sh  # the setup wizards (tl-init / tl-onboard / tl-new)
 ./test/run-smoke.sh      # tl-spawn arg resolution + the tl-run pipeline driver
 ./test/tl-top-smoke.sh   # the tl-top fleet-model builder (pure, no terminal, no instance)
+./test/scrub-smoke.sh    # the secret-scrub guard over content entering lead/
 ```
 
 Each prints its stages and ends with a single `PASS: ...` line and exit code 0. Any `FAIL: ...`
@@ -105,6 +106,16 @@ with no curses calls, and this smoke asserts it directly via `tl-top --selftest`
   working → quiet). The curses layer is then a thin, dumb render of this tested model.
 
 It needs no instance and no `TL_HOME` — the selftest builds its own throwaway fixture in `tmp`.
+
+### `scrub-smoke.sh` — the secret-scrub guard (memory hygiene)
+- Feeds `tl-scrub` a file carrying a real secret shape (an AWS access-key id) and asserts it
+  **blocks** (non-zero exit) — content bound for `lead/`/`decisions/` is refused, not committed.
+- Feeds it clean prose that only *mentions* "secrets" and "token:" and asserts it **passes**: the
+  deny-patterns key on secret *shapes*, not the words.
+- Asserts the flagged file is left **byte-for-byte untouched** — the guard escalates for owner
+  review, it never silently strips (a false positive costs ten seconds; a dropped load-bearing line
+  is worse).
+- Scans a whole directory (not just one file) and still finds the planted secret.
 
 ## Test fixtures (the fake workers/drivers)
 

@@ -6,6 +6,19 @@ All notable changes to TechLead are documented here. The format follows
 breaking → major — and is **hand-cut**, not automated: a tag means the release ran a week of real
 use (§4).
 
+## [Unreleased]
+
+### Added
+
+- **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
+  trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
+  superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K
+  tokens per always-loaded file) in `AGENTS.md`. Convention only, lifted from an evaluated-and-
+  rejected memory tool — no dependency or runtime.
+- **`tl-scrub`** — a deterministic deny-pattern guard that scans content entering `lead/`/`decisions/`
+  for keys, tokens, credentials, and internal hostnames; on a hit it escalates for owner review and
+  never strips (`test/scrub-smoke.sh`).
+
 ## [0.2.0] — 2026-08-03
 
 The **judgment layer comes alive** (Epic 6) alongside new fleet tooling. Still Phase 0.

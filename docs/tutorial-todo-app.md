@@ -240,6 +240,42 @@ spawned. That refusal — not the code — is what makes it a *tech lead* and no
 
 ---
 
+## Step 7 — See whether it's paying off (the kill-gate metric)
+
+TechLead has been quietly timing itself the whole way. Every grill and every approval wrote a row to
+`data/metrics.tsv` — no setup, it just happens. That feeds the **kill-gate** (D13): the honest check
+of whether supervising the agent actually costs you *less* time than doing the work yourself.
+
+There's one number it can't measure — how long *you'd* have taken by hand. Only you know that, so log
+your honest estimate per feature (`tl-approve` also nudges you after a manual approval):
+
+```sh
+tl-metric.sh record tl-add-list  self 900     # ~15 min if you'd hand-written it
+tl-metric.sh record tl-mark-done self 600     # ~10 min
+```
+
+Then read the ledger:
+
+```sh
+tl-metric.sh report
+```
+
+```
+feature              grill_s   approve_s    net_s   self_s verdict
+tl-add-list              120          30      150      900 faster ✓
+tl-mark-done              90          25      115      600 faster ✓
+```
+
+`net_s` is your total time on the loop (grill + approve); `verdict` compares it to `self_s`. A column
+of `faster ✓` means the supervision is buying you time; a wall of `slower ✗` is the gate telling you
+to stop or shrink the tool. On a real repo you'd read this alongside the reuse counters in
+`lead/principles.md` at ~feature 15 and make the continue/stop call with data, not a hunch.
+
+> **Two features isn't the verdict.** This is the *mechanism*, shown early so you know it's there. The
+> real kill-gate reads ~15 features — enough for the numbers to mean something.
+
+---
+
 ## Running a small crew
 
 Independent features can run in parallel. Spawn two, then let the watcher supervise both:

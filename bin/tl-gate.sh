@@ -40,7 +40,10 @@ echo "tl: gate for $id — $nfiles file(s) changed, $count finding(s)"
 git -C "$wt" --no-pager diff --stat "$base"..HEAD 2>/dev/null | sed 's/^/  /' || true
 
 # 4. resolve each finding (§2.3.1 approve/fix/skip). Non-interactive: TL_APPROVE=yes uses TL_RESOLVE.
+# Owner time spent resolving findings is the change-kind analogue of tl-approve — record it as the
+# D13 approval input (E1.5). A clean change (0 findings) costs ~no owner time, so nothing is recorded.
 if [ "$count" -gt 0 ]; then
+  t0="$(date +%s)"
   jq -r '.[]|"  ["+.id+"] "+.rule+": "+.detail' "$findings"
   if [ "${TL_APPROVE:-}" = "yes" ]; then
     jq --arg r "${TL_RESOLVE:-approve}" 'map(.resolved=$r)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
@@ -51,6 +54,7 @@ if [ "$count" -gt 0 ]; then
       jq --arg i "$fid" --arg a "$a" 'map(if .id==$i then .resolved=$a else . end)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
     done
   fi
+  "$BIN/tl-metric.sh" record "$id" approve "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
 fi
 
 # 5. gate result — refuse while anything is unresolved or needs a fix (fail closed, §2.3.1)

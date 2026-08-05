@@ -63,7 +63,10 @@ waitrep ch-dz
 TL_APPROVE=yes TL_RESOLVE=approve "$BIN/tl-gate.sh" ch-dz >/dev/null 2>&1 || true
 jq -e '.[]|select(.rule=="scope-cap-exceeded")' "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: no scope finding"
 jq -e '.[]|select(.rule=="danger-path")'       "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: no danger finding"
-echo "  C ok — scope + danger both flagged as ask-user"
+# D13 (E1.5): resolving gate findings is the change-kind approval — its time must be recorded
+awk -F'\t' '$2=="ch-dz" && $3=="approve"{f=1} END{exit f?0:1}' "$WORK/data/metrics.tsv" \
+  || fail "C: gate did not record approve-time after resolving findings"
+echo "  C ok — scope + danger both flagged as ask-user; approve-time recorded"
 
 echo "== D. self-edit tangle guard =="
 git -C "$PROJ" checkout -q -b tl/leak

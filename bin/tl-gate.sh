@@ -44,12 +44,19 @@ if [ "$count" -gt 0 ]; then
   jq -r '.[]|"  ["+.id+"] "+.rule+": "+.detail' "$findings"
   if [ "${TL_APPROVE:-}" = "yes" ]; then
     jq --arg r "${TL_RESOLVE:-approve}" 'map(.resolved=$r)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
-  else
+  elif exec 3</dev/tty 2>/dev/null; then
     for fid in $(jq -r '.[].id' "$findings"); do
       printf 'resolve [%s] approve/skip/fix? [approve] ' "$fid"
-      read -r a </dev/tty || a=approve; a="${a:-approve}"
+      read -r a <&3 || a=approve; a="${a:-approve}"
       jq --arg i "$fid" --arg a "$a" 'map(if .id==$i then .resolved=$a else . end)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
     done
+    exec 3<&-
+  else
+    # No controlling tty and TL_APPROVE unset: we cannot reach a human. Do NOT default to approve —
+    # opening /dev/tty and letting it fail silently merged regressions in headless/cron/nested runs.
+    # Fail closed (§2.3.1, §3.9): leave findings unresolved so step 5 blocks. `[ -r /dev/tty ]` is not
+    # enough — the node is world-readable but open() still fails, so we test by actually opening it.
+    tl_log "no tty to resolve $count finding(s) — leaving them unresolved (fail closed). Resolve non-interactively with: TL_APPROVE=yes TL_RESOLVE=approve|skip|fix"
   fi
 fi
 

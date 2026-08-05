@@ -60,10 +60,18 @@ echo "  B ok — regression flagged and blocked"
 echo "== C. scope-cap + danger-path flagged =="
 TL_CW_FILES="secret/key.txt a.txt b.txt c.txt d.txt" sp --id ch-dz --brief "5 files incl danger"
 waitrep ch-dz
+# fail closed: headless (no tty) with no TL_APPROVE must BLOCK, never silently auto-approve (§2.3.1)
+if "$BIN/tl-gate.sh" ch-dz >/tmp/chfc.log 2>&1; then fail "C: gate passed headless without TL_APPROVE"; fi
+grep -q 'gate blocked' /tmp/chfc.log || fail "C: expected a fail-closed block, got: $(cat /tmp/chfc.log)"
+jq -e '[.[]|select(.resolved==null)]|length>0' "$WORK/data/ch-dz/findings.json" >/dev/null \
+  || fail "C: findings were resolved without a human (fail-closed violation)"
 TL_APPROVE=yes TL_RESOLVE=approve "$BIN/tl-gate.sh" ch-dz >/dev/null 2>&1 || true
 jq -e '.[]|select(.rule=="scope-cap-exceeded")' "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: no scope finding"
 jq -e '.[]|select(.rule=="danger-path")'       "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: no danger finding"
-echo "  C ok — scope + danger both flagged as ask-user"
+# D13 (E1.5): resolving gate findings is the change-kind approval — its time must be recorded
+awk -F'\t' '$2=="ch-dz" && $3=="approve"{f=1} END{exit f?0:1}' "$WORK/data/metrics.tsv" \
+  || fail "C: gate did not record approve-time after resolving findings"
+echo "  C ok — scope + danger both flagged as ask-user; approve-time recorded"
 
 echo "== D. self-edit tangle guard =="
 git -C "$PROJ" checkout -q -b tl/leak

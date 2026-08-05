@@ -23,3 +23,4 @@ t1="$(date +%s)"
 tl_meta_set "$id" approval "$ans"
 "$BIN/tl-metric.sh" record "$id" approve "$((t1 - t0))" || true   # D13 input (E1.5)
 tl_log "task $id: $ans"
+echo "tl: log the counterfactual when known:  tl-metric record $id self <seconds>"

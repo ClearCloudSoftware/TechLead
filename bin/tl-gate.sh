@@ -40,17 +40,28 @@ echo "tl: gate for $id — $nfiles file(s) changed, $count finding(s)"
 git -C "$wt" --no-pager diff --stat "$base"..HEAD 2>/dev/null | sed 's/^/  /' || true
 
 # 4. resolve each finding (§2.3.1 approve/fix/skip). Non-interactive: TL_APPROVE=yes uses TL_RESOLVE.
+# Owner time spent resolving findings is the change-kind analogue of tl-approve — record it as the
+# D13 approval input (E1.5). A clean change (0 findings) costs ~no owner time, so nothing is recorded.
 if [ "$count" -gt 0 ]; then
+  t0="$(date +%s)"
   jq -r '.[]|"  ["+.id+"] "+.rule+": "+.detail' "$findings"
   if [ "${TL_APPROVE:-}" = "yes" ]; then
     jq --arg r "${TL_RESOLVE:-approve}" 'map(.resolved=$r)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
-  else
+  elif exec 3</dev/tty 2>/dev/null; then
     for fid in $(jq -r '.[].id' "$findings"); do
       printf 'resolve [%s] approve/skip/fix? [approve] ' "$fid"
-      read -r a </dev/tty || a=approve; a="${a:-approve}"
+      read -r a <&3 || a=approve; a="${a:-approve}"
       jq --arg i "$fid" --arg a "$a" 'map(if .id==$i then .resolved=$a else . end)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
     done
+    exec 3<&-
+  else
+    # No controlling tty and TL_APPROVE unset: we cannot reach a human. Do NOT default to approve —
+    # opening /dev/tty and letting it fail silently merged regressions in headless/cron/nested runs.
+    # Fail closed (§2.3.1, §3.9): leave findings unresolved so step 5 blocks. `[ -r /dev/tty ]` is not
+    # enough — the node is world-readable but open() still fails, so we test by actually opening it.
+    tl_log "no tty to resolve $count finding(s) — leaving them unresolved (fail closed). Resolve non-interactively with: TL_APPROVE=yes TL_RESOLVE=approve|skip|fix"
   fi
+  "$BIN/tl-metric.sh" record "$id" approve "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
 fi
 
 # 5. gate result — refuse while anything is unresolved or needs a fix (fail closed, §2.3.1)

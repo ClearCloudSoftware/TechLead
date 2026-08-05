@@ -32,6 +32,16 @@ if [ -n "$maxf" ] && [ "${nfiles:-0}" -gt "$maxf" ]; then
 for f in $changed; do for g in $danger; do
   case "$f" in $g) printf 'danger-path\t%s touches danger zone %s\t%s\n' "$f" "$g" "$f" >> "$tmp";; esac
 done; done
+# Spec axis (#54, q5): on every change, an LLM judge checks the diff against the spec's decided answers;
+# a decided-violation (and an equally-loud can't-evaluate) folds in here as a finding, classified
+# ask-user by the empty rubric so it blocks the merge. Judgment stays in the named Spec detector — it
+# never leaks into the mechanical rules (risk-17 guard holds).
+# tl: runs only when a judge is configured (TL_SPECDIFF_CMD); unconfigured = skipped for Phase-0
+#     bootstrap. Upgrade: make the judge mandatory once the crew ships a configured review harness.
+if [ -n "${TL_SPECDIFF_CMD:-}" ]; then
+  "$BIN/tl-specdiff.sh" run "$id" || true
+  "$BIN/tl-specdiff.sh" findings "$id" >> "$tmp" || true
+fi
 # classify each finding via the rubric router (#55): rule -> class + class_source. Unknown -> ask-user.
 tmp2="$(mktemp)"; : > "$tmp2"
 while IFS="$TAB" read -r rule detail path; do

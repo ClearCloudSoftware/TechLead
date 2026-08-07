@@ -29,9 +29,14 @@ tmp="$(mktemp)"; : > "$tmp"
 for t in $regressions; do [ -n "$t" ] && printf 'test-regression\tnewly failing: %s\t\n' "$t" >> "$tmp"; done
 if [ -n "$maxf" ] && [ "${nfiles:-0}" -gt "$maxf" ]; then
   printf 'scope-cap-exceeded\t%s files changed > max %s\t\n' "$nfiles" "$maxf" >> "$tmp"; fi
+set -f   # danger_paths are case-patterns; never pathname-expand them against the CWD (a real secret/ dir would break detection)
 for f in $changed; do for g in $danger; do
   case "$f" in $g) printf 'danger-path\t%s touches danger zone %s\t%s\n' "$f" "$g" "$f" >> "$tmp";; esac
 done; done
+set +f
+# tl: annotated-shortcut convention (#57): a tl: shortcut on a danger path is ask-user (qi5), and a
+# tl: comment that names no upgrade path is malformed (§3.13). Pure-bash detector, folded in + classified.
+"$BIN/tl-shortcut.sh" "$id" >> "$tmp" || true
 # Spec axis (#54, q5): on every change, an LLM judge checks the diff against the spec's decided answers;
 # a decided-violation (and an equally-loud can't-evaluate) folds in here as a finding, classified
 # ask-user by the empty rubric so it blocks the merge. Judgment stays in the named Spec detector — it

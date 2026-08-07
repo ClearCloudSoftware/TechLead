@@ -82,7 +82,13 @@ if [ -z "$kind" ] && reg_has "$pname"; then
   esac
 fi
 [ -n "$kind" ] || tl_die "cannot resolve kind for '$id' — pass --kind plan|change or set it on the spec (tl-spec set $id kind ...)"
-case "$kind" in plan|change) ;; *) tl_die "kind must be plan or change in Phase 0 (got: $kind)";; esac
+case "$kind" in plan|change|review) ;; *) tl_die "kind must be plan, change, or review (got: $kind)";; esac
+# review has no coding worker — its "workers" are the two review axes. It reviews an existing change,
+# draft-only, so it is run directly rather than spawned into a worktree (§2.2, E8.6).
+if [ "$kind" = review ]; then
+  echo "tl: review is draft-only over an existing change — run:  tl-review <change-id>" >&2
+  exit 0
+fi
 # NB: an explicit --project/--project-name is trusted even if unregistered (the manual path); the gate
 # degrades safely for an unregistered project. Resolution from the spec only ever uses a registered
 # name (checked above), so a phantom project can't be dispatched implicitly.

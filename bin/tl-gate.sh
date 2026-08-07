@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # tl-gate.sh — the delivery gate for a change task (§3.13, L2). Runs the project's tests, compares
 # the failing set against the recorded baseline, checks scope + danger paths, and emits a structured
-# findings.json — not a pass/fail bit. Fail-closed: every finding defaults to `ask-user` until a real
-# review-rubric exists (Epic 8). Exits non-zero while any finding is unresolved or marked `fix`.
+# findings.json — not a pass/fail bit. Each finding is classified via lead/review-rubric.md
+# (tl-classify, #55); an empty rubric fails closed to `ask-user`. Exits non-zero while any finding is unresolved or marked `fix`.
 # tl: `eval` on operator test_command — trusted registry only; assumes no spaces in changed paths
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+TAB="$(printf '\t')"
 id="${1:?usage: tl-gate ID}"
 [ "$(tl_meta_get "$id" kind)" = change ] || tl_die "gate is for change tasks"
 wt="$(tl_meta_get "$id" worktree)"; base="$(tl_meta_get "$id" base)"; pname="$(tl_meta_get "$id" pname)"
@@ -23,17 +24,27 @@ regressions="$(comm -13 "$baseline" "$curfail" 2>/dev/null || true)"
 changed="$(git -C "$wt" diff --name-only "$base"..HEAD 2>/dev/null || true)"
 nfiles="$(printf '%s\n' "$changed" | grep -c . || true)"
 
-# 3. collect findings (rule<TAB>detail), then render to JSON with fail-closed ask-user class
+# 3. collect findings as rule<TAB>detail<TAB>path (path empty where the finding has no single file)
 tmp="$(mktemp)"; : > "$tmp"
-for t in $regressions; do [ -n "$t" ] && printf 'test-regression\tnewly failing: %s\n' "$t" >> "$tmp"; done
+for t in $regressions; do [ -n "$t" ] && printf 'test-regression\tnewly failing: %s\t\n' "$t" >> "$tmp"; done
 if [ -n "$maxf" ] && [ "${nfiles:-0}" -gt "$maxf" ]; then
-  printf 'scope-cap-exceeded\t%s files changed > max %s\n' "$nfiles" "$maxf" >> "$tmp"; fi
+  printf 'scope-cap-exceeded\t%s files changed > max %s\t\n' "$nfiles" "$maxf" >> "$tmp"; fi
 for f in $changed; do for g in $danger; do
-  case "$f" in $g) printf 'danger-path\t%s touches danger zone %s\n' "$f" "$g" >> "$tmp";; esac
+  case "$f" in $g) printf 'danger-path\t%s touches danger zone %s\t%s\n' "$f" "$g" "$f" >> "$tmp";; esac
 done; done
+# classify each finding via the rubric router (#55): rule -> class + class_source. Unknown -> ask-user.
+tmp2="$(mktemp)"; : > "$tmp2"
+while IFS="$TAB" read -r rule detail path; do
+  [ -n "$rule" ] || continue
+  cls="$("$BIN/tl-classify.sh" "$rule")"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$rule" "$detail" "$path" "${cls%%$TAB*}" "${cls#*$TAB}" >> "$tmp2"
+done < "$tmp"
+# render the §3.13 schema: id, class(+source), rule, path, line, detail, resolved
 jq -R -s -c 'split("\n")|map(select(length>0)|split("\t"))|to_entries
-  |map({id:("f"+((.key+1)|tostring)),class:"ask-user",rule:.value[0],detail:.value[1],resolved:null})' "$tmp" > "$findings"
-rm -f "$curfail" "$tmp"
+  |map({id:("f"+((.key+1)|tostring)), class:.value[3], class_source:.value[4],
+        rule:.value[0], path:(.value[2]|select(.!="")//null), line:null,
+        detail:.value[1], resolved:null})' "$tmp2" > "$findings"
+rm -f "$curfail" "$tmp" "$tmp2"
 
 count="$(jq 'length' "$findings")"
 echo "tl: gate for $id — $nfiles file(s) changed, $count finding(s)"
@@ -65,6 +76,8 @@ if [ "$count" -gt 0 ]; then
 fi
 
 # 5. gate result — refuse while anything is unresolved or needs a fix (fail closed, §2.3.1)
+# tl: v1's rubric is empty, so every finding is ask-user and blocks until resolved. When the first
+#     auto-fix rule lands (#55 q3), apply+record it above and exclude class=="auto-fix" here.
 blocking="$(jq '[.[]|select(.resolved==null or .resolved=="fix")]|length' "$findings")"
 [ "$blocking" -eq 0 ] || tl_die "gate blocked: $blocking finding(s) unresolved or marked fix" 3
 echo "tl: gate passed for $id"

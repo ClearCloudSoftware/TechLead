@@ -68,6 +68,12 @@ jq -e '[.[]|select(.resolved==null)]|length>0' "$WORK/data/ch-dz/findings.json" 
 TL_APPROVE=yes TL_RESOLVE=approve "$BIN/tl-gate.sh" ch-dz >/dev/null 2>&1 || true
 jq -e '.[]|select(.rule=="scope-cap-exceeded")' "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: no scope finding"
 jq -e '.[]|select(.rule=="danger-path")'       "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: no danger finding"
+# #55/#56: every finding carries class_source; empty rubric -> ask-user/default:no-entry, and the
+# danger-path finding carries its file in `path`
+jq -e 'all(.[]; .class_source=="default:no-entry" and .class=="ask-user" and has("path") and has("line"))' \
+  "$WORK/data/ch-dz/findings.json" >/dev/null || fail "C: findings missing class_source/path/line or not fail-closed"
+jq -e '.[]|select(.rule=="danger-path")|.path|test("secret/")' "$WORK/data/ch-dz/findings.json" >/dev/null \
+  || fail "C: danger-path finding did not record its file path"
 # D13 (E1.5): resolving gate findings is the change-kind approval — its time must be recorded
 awk -F'\t' '$2=="ch-dz" && $3=="approve"{f=1} END{exit f?0:1}' "$WORK/data/metrics.tsv" \
   || fail "C: gate did not record approve-time after resolving findings"

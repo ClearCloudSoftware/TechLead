@@ -17,13 +17,19 @@ case "${1:-}" in
   report)
     [ -f "$LEDGER" ] || { echo "no metrics yet"; exit 0; }
     awk -F'\t' '
-      { t[$2 SUBSEP $3]+=$4; feat[$2]=1 }
+      { t[$2 SUBSEP $3]+=$4; feat[$2]=1; has[$2 SUBSEP $3]=1 }   # has[]: distinguish "no data" from 0s
       END {
         printf "%-18s %9s %11s %8s %8s %-9s\n","feature","grill_s","approve_s","net_s","self_s","verdict"
         for (fe in feat) {
-          g=t[fe SUBSEP "grill"]; a=t[fe SUBSEP "approve"]; s=t[fe SUBSEP "self"]; net=g+a
-          v = (s==0) ? "" : (net<s ? "faster ✓" : "slower ✗")   # D13: net owner-time vs do-it-myself
-          printf "%-18s %9d %11d %8d %8d %-9s\n", fe, g, a, net, s, v
+          hg=has[fe SUBSEP "grill"]; ha=has[fe SUBSEP "approve"]; hs=has[fe SUBSEP "self"]
+          g=t[fe SUBSEP "grill"]; a=t[fe SUBSEP "approve"]; s=t[fe SUBSEP "self"]
+          gs=(hg?g"":"—"); as_=(ha?a"":"—"); ss=(hs?s"":"—")
+          # net owner-time and the verdict need BOTH grill and approve captured, else not comparable
+          if (hg && ha) { net=g+a; ns=net"" } else ns="—"
+          if (!hs)                v=""
+          else if (hg && ha)      v=(net<s ? "faster ✓" : "slower ✗")
+          else                    v="incomplete"   # self set but grill/approve time missing (D13: not evaluable)
+          printf "%-18s %9s %11s %8s %8s %-9s\n", fe, gs, as_, ns, ss, v
         }
       }' "$LEDGER"
     ;;

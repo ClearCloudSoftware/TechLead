@@ -23,4 +23,6 @@ Question: $TL_ANS_Q
 The record:
 $corpus"
 
-claude -p "$prompt" --output-format json --permission-mode default --max-turns 3 </dev/null | jq -r '.result'
+out="$(claude -p "$prompt" --output-format json --permission-mode default --max-turns 3 </dev/null)"
+printf '%s' "$out" | "$TL_HOME/bin/tl-cost.sh" record-json "(query)" answer || true
+printf '%s' "$out" | jq -r '.result'

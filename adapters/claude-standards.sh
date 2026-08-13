@@ -30,5 +30,6 @@ rule<TAB>detail<TAB>path
 - detail = one line: what + where, quoting the hunk briefly; path = the file
 Report nothing for clean hunks. Skip anything automated tooling enforces."
 
-claude -p "$prompt" --output-format json --permission-mode default --max-turns 4 </dev/null \
-  | jq -r '.result' | awk -F'\t' 'NF>=3 && ($1=="standards-violation" || $1=="standards-smell")'
+out="$(claude -p "$prompt" --output-format json --permission-mode default --max-turns 4 </dev/null)"
+printf '%s' "$out" | "$TL_HOME/bin/tl-cost.sh" record-json "${TL_ST_ID:-(standards)}" standards || true
+printf '%s' "$out" | jq -r '.result' | awk -F'\t' 'NF>=3 && ($1=="standards-violation" || $1=="standards-smell")'

@@ -13,6 +13,13 @@ case "${1:-}" in
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$id" "$category" "$in_" "$out_" "$cost" >> "$LEDGER"
     ;;
+  record-json)  # tl-cost record-json <id> <category>  — read a `claude -p --output-format json` envelope
+    shift; id="${1:?id}"; category="${2:?category}"; j="$(cat)"   # so every LLM adapter records cost, not just the worker
+    in_="$(printf '%s' "$j" | jq '((.usage.input_tokens//0)+(.usage.cache_read_input_tokens//0)+(.usage.cache_creation_input_tokens//0))' 2>/dev/null || echo 0)"
+    out_="$(printf '%s' "$j" | jq '(.usage.output_tokens//0)' 2>/dev/null || echo 0)"
+    cost="$(printf '%s' "$j" | jq '(.total_cost_usd//0)' 2>/dev/null || echo 0)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$id" "$category" "$in_" "$out_" "$cost" >> "$LEDGER"
+    ;;
   report)  # tl-cost report [id]
     [ -f "$LEDGER" ] || { echo "no cost records yet"; exit 0; }
     awk -F'\t' -v f="${2:-}" '
@@ -23,5 +30,5 @@ case "${1:-}" in
         printf "%-14s %12d %12d %12.4f\n","TOTAL",ti,to,tc
       }' "$LEDGER"
     ;;
-  *) tl_die "usage: tl-cost record <id> <category> <input> <output> [cost_usd] | tl-cost report [id]";;
+  *) tl_die "usage: tl-cost record <id> <category> <input> <output> [cost_usd] | record-json <id> <category> (JSON on stdin) | report [id]";;
 esac

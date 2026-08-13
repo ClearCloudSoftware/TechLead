@@ -20,4 +20,6 @@ reusable, and never import outside judgement. Output ONLY the drafted markdown, 
 
 Triggering case:
 $case_text"
-claude -p "$prompt" --output-format json --permission-mode default --max-turns 3 </dev/null | jq -r '.result'
+out="$(claude -p "$prompt" --output-format json --permission-mode default --max-turns 3 </dev/null)"
+printf '%s' "$out" | "$TL_HOME/bin/tl-cost.sh" record-json "(proposal)" propose || true
+printf '%s' "$out" | jq -r '.result'

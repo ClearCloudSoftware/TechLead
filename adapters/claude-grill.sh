@@ -25,5 +25,6 @@ source=owner. Output ONLY one tab-separated line per question and nothing else:
 qid<TAB>answer_state<TAB>source<TAB>text
 answer_state ∈ decided|leaning|open|spike, source ∈ inferred|owner."
 
-claude -p "$prompt" --output-format json --permission-mode default --max-turns 6 </dev/null \
-  | jq -r '.result' | awk -F'\t' 'NF>=4'
+out="$(claude -p "$prompt" --output-format json --permission-mode default --max-turns 6 </dev/null)"
+printf '%s' "$out" | "$TL_HOME/bin/tl-cost.sh" record-json "${TL_GRILL_ID:-(grill)}" grill || true
+printf '%s' "$out" | jq -r '.result' | awk -F'\t' 'NF>=4'

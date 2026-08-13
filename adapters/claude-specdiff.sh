@@ -27,5 +27,6 @@ Output ONLY one tab-separated line per question and nothing else:
 qid<TAB>verdict<TAB>one-line why (name the exact diff behaviour you judged)
 verdict ∈ satisfied|violated|cant-eval."
 
-claude -p "$prompt" --output-format json --permission-mode default --max-turns 4 </dev/null \
-  | jq -r '.result' | awk -F'\t' 'NF>=3'
+out="$(claude -p "$prompt" --output-format json --permission-mode default --max-turns 4 </dev/null)"
+printf '%s' "$out" | "$TL_HOME/bin/tl-cost.sh" record-json "${TL_SD_ID:-(specdiff)}" spec-review || true
+printf '%s' "$out" | jq -r '.result' | awk -F'\t' 'NF>=3'

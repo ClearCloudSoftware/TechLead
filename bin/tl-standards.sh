@@ -21,7 +21,7 @@ case "${1:?usage: tl-standards run|findings|report ID}" in
     done
     diff="$(mktemp)"; git -C "$wt" --no-pager diff "$base"..HEAD > "$diff" 2>/dev/null || true
     ff="$(ff_path "$id")"; mkdir -p "$(dirname "$ff")"
-    TL_ST_STANDARDS="$std" TL_ST_DIFF="$diff" $TL_STANDARDS_CMD > "$ff" || true
+    TL_ST_ID="$id" TL_ST_STANDARDS="$std" TL_ST_DIFF="$diff" $TL_STANDARDS_CMD > "$ff" || true
     rm -f "$std" "$diff"
     v="$(awk -F'\t' '$1=="standards-violation"{c++} END{print c+0}' "$ff")"
     s="$(awk -F'\t' '$1=="standards-smell"{c++} END{print c+0}' "$ff")"

@@ -15,3 +15,11 @@ echo "tl: capturing baseline for $name  ($cmd)"
 "$BIN/tl-project.sh" set "$name" baseline "$out"
 "$BIN/tl-project.sh" set "$name" baseline_at "$(date -u +%Y-%m-%d)"
 echo "tl: baseline recorded — $(grep -c . "$out" 2>/dev/null || echo 0) known-failing test(s)"
+
+# A captured baseline is the completion criterion a `change` needs, so a survey (plan-only) project
+# graduates to `ready` here — exactly as tl-new and the tutorial promise. Leave ready/assisted as-is
+# (re-baselining an established project must not change its readiness).
+if [ "$("$BIN/tl-project.sh" get "$name" readiness 2>/dev/null || true)" = survey ]; then
+  "$BIN/tl-project.sh" set "$name" readiness ready
+  echo "tl: $name promoted survey → ready (change tasks now allowed)"
+fi

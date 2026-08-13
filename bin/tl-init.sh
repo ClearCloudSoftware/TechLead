@@ -19,7 +19,7 @@ case "$harness" in
             model="$(tl_ask MODEL "opencode model (must support tools)" "ollama/qwen3-coder:30b")";;
   *) tl_die "unknown harness: $harness (want claude|opencode)";;
 esac
-projects_dir="$(tl_ask PROJECTS_DIR "default dir for NEW projects (tl-new)" "$TL_HOME/projects")"
+projects_dir="$(tl_ask PROJECTS_DIR "fixed home for NEW projects — blank = wherever you run tl-new" "")"
 
 # Single owner of config/instance.env. Conditional assignments => a var already set in the shell
 # wins over the file (the W1 contract). tl-common reads back from this same $TL_CONFIG.

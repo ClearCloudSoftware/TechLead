@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# tl-new.sh — greenfield project wizard (§2.7, E11/W7). Creates an EMPTY git repo under
-# TL_PROJECTS_DIR and registers it at readiness=survey — a repo with no tests can only take `plan`
+# tl-new.sh — greenfield project wizard (§2.7, E11/W7). Creates an EMPTY git repo in the current
+# directory (or $TL_PROJECTS_DIR if the operator set a fixed home) and registers it at
+# readiness=survey — a repo with no tests can only take `plan`
 # tasks. It grows through TechLead's own loop: early plan tasks set up structure + a test harness,
 # which promotes it to `ready` for `change` tasks. It does NOT scaffold an app framework — that is
 # not TechLead's job. Orchestrator, not owner: registration goes through tl-project (§3.1).
@@ -10,16 +11,18 @@ BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.s
 name=""
 while [ $# -gt 0 ]; do case "$1" in
   --yes|-y) TL_YES=1; shift;;
-  -h|--help) echo "usage: tl-new <name>   (creates \$TL_PROJECTS_DIR/<name>, registered at readiness=survey)"; exit 0;;
+  -h|--help) echo "usage: tl-new <name>   (creates ./<name> here — or \$TL_PROJECTS_DIR/<name> if set; registered at readiness=survey)"; exit 0;;
   -*) tl_die "unknown arg: $1";;
   *) name="$1"; shift;;
 esac; done
 [ -n "$name" ] || tl_die "usage: tl-new <name>"
 case "$name" in */*|.*) tl_die "name must be a bare directory name (got: $name)";; esac
 
-# TL_PROJECTS_DIR is the home for NEW projects only (set by tl-init); tl-new owns its default.
-TL_PROJECTS_DIR="${TL_PROJECTS_DIR:-$TL_HOME/projects}"
-target="$TL_PROJECTS_DIR/$name"
+# Create in the CURRENT directory by default — like `git init` / `cargo new`, so `tl-new foo` from your
+# projects folder lands `./foo`, not somewhere surprising. An operator who wants a fixed home for new
+# projects can set TL_PROJECTS_DIR (§3.2, "projects can live anywhere"); unset/empty -> create here.
+parent="${TL_PROJECTS_DIR:-$PWD}"
+target="$parent/$name"
 [ -e "$target" ] && tl_die "$target already exists — use 'tl-onboard $target' to register an existing repo"
 
 mkdir -p "$target"

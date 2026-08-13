@@ -19,7 +19,8 @@ case "$harness" in
             model="$(tl_ask MODEL "opencode model (must support tools)" "ollama/qwen3-coder:30b")";;
   *) tl_die "unknown harness: $harness (want claude|opencode)";;
 esac
-projects_dir="$(tl_ask PROJECTS_DIR "fixed home for NEW projects — blank = wherever you run tl-new" "")"
+# NB: no projects-dir prompt — tl-new creates in the current directory. Set TL_PROJECTS_DIR in your
+# shell only if you want a fixed home for every new project (rare); tl-init does not bake it in.
 
 # Single owner of config/instance.env. Conditional assignments => a var already set in the shell
 # wins over the file (the W1 contract). tl-common reads back from this same $TL_CONFIG.
@@ -30,7 +31,6 @@ mkdir -p "$(dirname "$TL_CONFIG")"
   printf 'export TL_WORKER_CMD="${TL_WORKER_CMD:-%s}"\n' "$worker"
   printf 'export TL_GRILL_CMD="${TL_GRILL_CMD:-%s}"\n' "$grill"
   [ -n "$model" ] && printf 'export TL_OPENCODE_MODEL="${TL_OPENCODE_MODEL:-%s}"\n' "$model"
-  printf 'export TL_PROJECTS_DIR="${TL_PROJECTS_DIR:-%s}"\n' "$projects_dir"
 } > "$TL_CONFIG"
 tl_log "wrote $TL_CONFIG"
 
@@ -46,5 +46,5 @@ if tl_confirm SEED_LEAD "scaffold the lead/ file skeleton (empty stubs)" "y"; th
   tl_log "seeded lead/ skeleton (stubs — fill questions.md before grilling; see docs/tutorial-todo-app.md)"
 fi
 
-printf 'tl: instance configured (harness=%s, projects_dir=%s)\n' "$harness" "$projects_dir" >&2
+printf 'tl: instance configured (harness=%s)\n' "$harness" >&2
 printf 'tl: next → register an existing repo: tl-onboard <path>   |   create a new one: tl-new <name>\n' >&2

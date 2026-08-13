@@ -43,7 +43,7 @@ if tl_confirm SEED_LEAD "scaffold the lead/ file skeleton (empty stubs)" "y"; th
     [ -f "$L/$f.md" ] && continue
     printf '# %s\n\n<!-- stub (tl-init). Shape: lead/SHAPE.md. Fill from real grills; do not seed borrowed judgment (lead/README). -->\n' "$f" > "$L/$f.md"
   done
-  tl_log "seeded lead/ skeleton (stubs — fill questions.md before grilling; see docs/tutorial-todo-app.md)"
+  tl_log "seeded lead/ skeleton (stubs — fill questions.md before grilling)"
 fi
 
 printf 'tl: instance configured (harness=%s)\n' "$harness" >&2

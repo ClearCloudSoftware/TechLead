@@ -3,7 +3,7 @@
 # (zero prompts, no live model) against throwaway repos and asserts they produce, via the
 # single-owner scripts, a registry entry + baseline. Fast + deterministic — part of the default suite.
 #
-# Isolation (per TESTING.md): TL_HOME is the real repo (so $TL_HOME/bin resolves) but TL_DATA/STATE/
+# Isolation: TL_HOME is the real repo (so $TL_HOME/bin resolves) but TL_DATA/STATE/
 # WORKTREES *and* TL_CONFIG/TL_PROJECTS_DIR are redirected into a temp dir, so the real config/ and
 # projects/ are never touched. `--yes` + TL_YES + </dev/null guarantee nothing can prompt or hang.
 set -eu

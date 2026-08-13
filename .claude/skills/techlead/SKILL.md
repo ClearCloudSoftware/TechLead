@@ -1,53 +1,57 @@
 ---
 name: techlead
-description: Drive TechLead — the tl-* bash toolbelt that supervises coding workers on a managed repo — in natural language. Use when the user wants to onboard a repo, build or ship a feature, review a change, or ask an inward question with TechLead, or mentions tl-run, tl-grill, tl-gate, the backlog, or the todo tutorial. Runs all the mechanics (onboard, draft the test harness, baseline, grill, spawn, watch, gate, deliver) and stops at the owner's two decisions — grill open-questions and gate findings — which it never decides itself.
+description: Drive TechLead — the tl-* bash toolbelt that supervises coding workers on a managed repo — in natural language. Use when the user wants to start a new app, onboard an existing repo, build or ship a feature, review a change, or ask an inward question with TechLead, or mentions tl-run, tl-grill, tl-gate, or the backlog. Runs the mechanics (create/register the project, draft the test harness, baseline, grill, spawn, watch, gate, deliver) and stops at the owner's two decisions — grill open-questions and gate findings — which it never decides itself.
 ---
 
 # Operating TechLead
 
 You are the **operator front-end** for TechLead (bash toolbelt `bin/tl-*.sh`). You run the mechanics
-and draft the fiddly bits. **You are NOT the lead.** First: `export TL_HOME=<checkout>` and put its
-`bin` on PATH.
+and draft the fiddly bits. **You are NOT the lead.** First: `export TL_HOME=<checkout>`, put its `bin`
+on PATH.
+
+## Never do this
+
+- **Never build the example from `docs/tutorial-todo-app.md`.** That file is a *workflow reference*
+  built around a throwaway todo app — it is NOT the thing to build, and you rarely need to open it. The
+  app to build is **whatever the user named**: "a habit tracker" means a habit tracker, from scratch.
+- **Never reuse or scaffold from an existing app directory** (e.g. `todo-app*`, `*-nextjs`). Every new
+  app is its own fresh, empty project, created via `tl-new` below.
+- **Never answer a grill or approve a gate** for the owner (see the hard rule).
+
+## Start here — route the request
+
+- "build / start a **new** app called X" → `tl-new <x-slug>` **in the current directory** (creates
+  `./<x-slug>`, empty, registered at `survey`). Then → **Build**.
+- "work on **this repo**" / a path to an existing repo → `tl-onboard <path>`. Then → **Build**.
+- "add / build **feature** Y" (project already exists) → **Build**.
+- "**review** the change" → `tl-review <id>`.   "**answer**: …" → `tl-answer "<question>"`.
 
 ## The one hard rule — never break it
 
-Stop at exactly two points and hand them to the owner. **Never decide them yourself:**
+Stop at exactly two points and hand them to the owner; never decide them yourself:
 
-1. **Grill open questions** — after a grill, if the spec has any `open` question, STOP. Show it and
-   wait for the owner to run `tl-grill answer <id> <qid> decided|leaning|spike "<text>"` (or reject).
-2. **Gate findings** — at delivery, if `findings.json` has any unresolved finding, STOP. Show each and
-   wait for the owner's **approve / skip / fix**.
+1. **Grill open questions** — if the spec has any `open` question after a grill, STOP; wait for the
+   owner's `tl-grill answer <id> <qid> decided|leaning|spike "<text>"` (or reject).
+2. **Gate findings** — if `findings.json` has any unresolved finding at delivery, STOP; wait for the
+   owner's **approve / skip / fix**.
 
-Answering a grill or approving a gate *for* the owner turns you into the lead — the one thing TechLead
-exists to keep human. **Draft and run; never judge.**
+Deciding either turns you into the lead — the one thing TechLead keeps human. Draft and run; never judge.
 
-## Figure out where you are (read state, don't hardcode an order)
+## Build (features into the project)
 
-- `tl-project.sh get <name> readiness` → `survey` | `assisted` | `ready`
-- `tl-spec.sh get <id> state` + `tl-spec.sh open-count <id>` → spec state, open-question count
-- `tl-state.sh <id>` → `working` | `done` | `failed` | `needs-decision`
+Read state to know the next step — don't hardcode an order:
+`tl-project get <name> readiness` · `tl-spec get <id> state` + `open-count` · `tl-state <id>`.
 
-## Build a feature (the common path)
-
-1. **Register a project** if none: existing repo → `tl-onboard <path>`; new repo → `tl-new <name>`.
-2. **If readiness is `survey`** (no tests yet): **draft** a `test.sh` from the backlog item — a
-   `#!/bin/sh` that runs each behaviour and `echo`s one failing-id per broken one — **show it to the
-   owner, let them tweak/approve**, then `tl-project set <name> test_command "sh test.sh"` →
-   `tl-baseline <name>` (promotes survey → ready).
-3. Add the feature to `data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
-4. `tl-run <slug>` — grills, then spawns.  → **open questions? HARD-STOP (rule 1).**
-5. `tl-watch --once` (or poll `tl-state <id>`) until the worker is `done`.
-6. `tl-run <slug>` again — runs the gate.  → **findings? HARD-STOP (rule 2).** Clean → it ff-merges.
-
-## Other kinds
-
-- **Review** a built change: `tl-review <id>` (Spec + Standards axes → a draft; nothing posts).
-- **Answer** an inward question: `tl-answer "<question>"` (cites the owner's own record, or "I don't know").
-- **Refuse** work: `tl-grill reject <id> "<reason>"`.
-- **Is it paying off?** `tl-metric report`.
+1. **If readiness is `survey`** (fresh project, no tests): **draft** a `test.sh` for the app's first
+   behaviour — a `#!/bin/sh` that runs it and `echo`s one failing-id per broken behaviour — **show it,
+   let the owner tweak/approve**, then `tl-project set <name> test_command "sh test.sh"` →
+   `tl-baseline <name>` (promotes to ready).
+2. Add each feature to `data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
+3. `tl-run <slug>` — grills, then spawns.  → **open questions? HARD-STOP (rule 1).**
+4. `tl-watch --once` (or poll `tl-state <id>`) until the worker is `done`.
+5. `tl-run <slug>` again — runs the gate.  → **findings? HARD-STOP (rule 2).** Clean → it ff-merges.
 
 ## Notes
 
 - You draft the test harness; the owner owns *what "correct" means* — always show it before baselining.
-- One project registered → commands resolve it. Two+ → set it: `tl-spec set <id> project <name>`.
-- Full manual walkthrough: `docs/tutorial-todo-app.md`.
+- One project registered → commands resolve it. Two+ → `tl-spec set <id> project <name>`.

@@ -95,7 +95,7 @@ D=$(mktemp -d); export TODO_FILE="$D/todos.txt"
 python3 todo.py add "buy milk" >/dev/null 2>&1
 python3 todo.py list 2>/dev/null | grep -q "buy milk" || echo feat-add
 python3 todo.py done 1 >/dev/null 2>&1
-python3 todo.py list 2>/dev/null | grep -Eq "x|done|✓" || echo feat-done
+python3 todo.py list 2>/dev/null | grep -Eq '\[x\]|✓' || echo feat-done   # a real marker, NOT the "done" in the usage string
 rm -rf "$D"; exit 0
 EOF
 chmod +x test.sh

@@ -11,9 +11,9 @@ on PATH.
 
 ## Never do this
 
-- **Never build the example from `docs/tutorial-todo-app.md`.** That file is a *workflow reference*
-  built around a throwaway todo app — it is NOT the thing to build, and you rarely need to open it. The
-  app to build is **whatever the user named**: "a habit tracker" means a habit tracker, from scratch.
+- **Never build a bundled example/demo app.** The app to build is **whatever the user named** — "a
+  habit tracker" means a habit tracker, created from scratch. Don't go looking in `docs/` for something
+  to instantiate.
 - **Never reuse or scaffold from an existing app directory** (e.g. `todo-app*`, `*-nextjs`). Every new
   app is its own fresh, empty project, created via `tl-new` below.
 - **Never answer a grill or approve a gate** for the owner (see the hard rule).

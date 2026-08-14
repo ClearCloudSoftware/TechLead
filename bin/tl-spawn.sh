@@ -96,6 +96,11 @@ fi
 : "${TL_WORKER_CMD:?tl: no worker configured — set TL_WORKER_CMD to the harness adapter}"
 tl_log "spawn $id — kind=$kind, project=$pname ($project), brief=${brief:-none}"
 
+# Last chance to catch harness-invisibility: the worker's worktree branches from HEAD, so uncommitted
+# project files (test harness, fixtures, the code under review) won't be there. Warn, don't block —
+# the owner may have intentional WIP; but a blind worker on a fresh repo is almost always this.
+tl_warn_uncommitted "$project" "This worker will not see them; commit first if it needs them." || true
+
 pname="${pname:-$(basename "$project")}"   # registry key for the change gate (§3.12)
 wt="$(tl_worktree_acquire "$project" "$id")"
 wt="$(cd "$wt" && pwd -P)"   # canonicalize: git resolves symlinks (macOS /var -> /private/var)

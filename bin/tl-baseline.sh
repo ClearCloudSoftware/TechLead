@@ -16,6 +16,11 @@ echo "tl: capturing baseline for $name  ($cmd)"
 "$BIN/tl-project.sh" set "$name" baseline_at "$(date -u +%Y-%m-%d)"
 echo "tl: baseline recorded — $(grep -c . "$out" 2>/dev/null || echo 0) known-failing test(s)"
 
+# The baseline was just run against the WORKING TREE; a worker's gate reruns test_command against
+# committed state (§2.7). If the tree is dirty the two disagree — most often because the harness
+# itself isn't committed, exactly what makes a worker run blind. Say so here, at the promote moment.
+tl_warn_uncommitted "$path" "Commit them (especially the test harness) before dispatching change tasks, or the gate runs a different test than this baseline." || true
+
 # A captured baseline is the completion criterion a `change` needs, so a survey (plan-only) project
 # graduates to `ready` here — exactly as tl-new and the tutorial promise. Leave ready/assisted as-is
 # (re-baselining an established project must not change its readiness).

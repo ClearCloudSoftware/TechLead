@@ -133,6 +133,11 @@ tl-project.sh set myapp danger_paths "migrations/** billing/**"
 tl-baseline.sh myapp        # runs test_command, records the known-failing set
 ```
 
+> **Commit the test harness first.** `test_command` runs in the *worktree*, which a worker branches
+> from `HEAD` — so an **uncommitted** harness (or fixtures) is invisible to workers and to the gate,
+> and the baseline (run against your working tree) won't match what the gate reruns. `tl-baseline` and
+> `tl-spawn` warn when the project tree is dirty; commit before dispatching `change` tasks.
+
 | Key | Meaning |
 |-----|---------|
 | `path` | Absolute path to the project checkout |

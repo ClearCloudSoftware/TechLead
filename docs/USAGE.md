@@ -331,10 +331,16 @@ are deliberate:
 | `e` | edit the backlog item, or the spec | `$EDITOR` (at the item's line), full-screen |
 | `n` | jump to the next waiting item | in-TUI, instant |
 | `p` | peek the selected worker's output full-screen | opens it in `$PAGER` (default `less`); returns on exit |
-| `r` | run / resume the pipeline for the selected item | **confirm**, then `tl-run <slug>` in the normal terminal |
-| `g` | resolve the delivery gate for the selected task | **confirm**, then `tl-deliver <id>` — its gate prompts approve/skip/fix per finding |
+| `g` | **grill** an un-grilled backlog item | **confirm**, then `tl-grill <slug>` — the questions land back in the inbox to answer; no worker is dispatched |
+| `g` | …or resolve the delivery gate, on a dispatched task | **confirm**, then `tl-deliver <id>` — its gate prompts approve/skip/fix per finding |
+| `r` | run / resume the whole pipeline for the selected item | **confirm**, then `tl-run <slug>` in the normal terminal — this one *does* dispatch a worker |
 | `/` `:` | filter · command (view 3) | prompt |
 | `?` / `q` | keys · quit | — |
+
+`g` is the row's gate-ish verb and the two meanings can never both apply: an item either has a spec
+(a `tl-` id) or it has not been grilled yet. The footer names whichever one the row under the cursor
+answers to. The full loop without leaving the TUI is **`g` grill → `d`/`l`/`s` the questions it
+raises → `r` dispatch**.
 
 The answer prompt is `curses.textpad` (`^A`/`^E`/`^K`/`^U`, arrows, wrapping). It opens **seeded**:
 an already-answered question starts with its answer, so accepting what the grill inferred is `d`

@@ -22,6 +22,11 @@ use (§4).
     seeded, so accepting an inferred answer is `d`+`enter`. Every one shells out to the real
     `tl-grill answer` / `tl-grill reject` / `$EDITOR`: `tl-top` still renders and never mutates, so
     the command's validation and its `inferred-outcomes.tsv` correction log still fire.
+  - **`g` grills an un-grilled backlog item** right from the inbox (`tl-grill <slug>`, behind a
+    confirm), so the whole loop happens without leaving the TUI: grill, answer the questions it
+    raises with `d`/`l`/`s`, then `r` to dispatch. `g` stays the gate on a dispatched task — the two
+    can never both apply, and the footer names whichever the row answers to. Unlike `r`, it
+    dispatches no worker.
   - Answered questions deliberately have **no inbox row** (nothing is waiting on them); `:q <slug>`
     is where you reach one to correct it.
   - `test/tl-top-views-smoke.sh` drives the real curses UI in a **pty** — the pure-model selftest

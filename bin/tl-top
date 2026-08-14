@@ -839,16 +839,25 @@ def _draw_inbox(win, st, q, data_dir):
         names = " · ".join("%s %s" % (r.id, r.state) for r in q.quiet[:4])
         _addln(win, h - 2, 0, "quiet: %d working — %s" % (len(q.quiet), names),
                _bucket_attr("quiet"))
-    _foot_inbox(win, st, q)
+    _foot_inbox(win, st, q, rows[sel])
 
 
-def _foot_inbox(win, st, q):
+def _foot_inbox(win, st, q, row=None):
     h, _ = win.getmaxyx()
     if st["notice"]:
         _bar(win, h - 1, " " + st["notice"], " (any key) ")
+        return
+    # `g` and `d/l/s` only mean something on particular rows, so the footer names what THIS row
+    # answers to rather than a fixed list you have to learn the exceptions to.
+    if row is not None and row.what == "backlog":
+        keys = " g grill   r run (grill+dispatch)   e edit   x drop   / filter"
+    elif row is not None and row.what == "question":
+        keys = " d/l/s answer   e edit   x reject   r run   / filter"
+    elif row is not None and row.what == "gate":
+        keys = " g gate   p peek   e edit   r run   / filter"
     else:
-        _bar(win, h - 1, " d/l/s answer   e edit   r run   g gate   p peek   / filter",
-             "? help   q quit ")
+        keys = " r run   g gate   p peek   e edit   / filter"
+    _bar(win, h - 1, keys, "? help   q quit ")
 
 
 def _draw_detail(win, r, y, ymax, data_dir):
@@ -983,6 +992,8 @@ def _draw_briefing(win, st, q, data_dir):
     elif r.what == "question":
         _bar(win, h - 1, " d decided   l leaning   s spike   x reject item   e edit",
              "n next   q quit ")
+    elif r.what == "backlog":
+        _bar(win, h - 1, " g grill   r run (grill+dispatch)   e edit   x drop", "n next   q quit ")
     else:
         _bar(win, h - 1, " r run   g gate   p peek   e edit   x reject", "n next   q quit ")
 
@@ -1318,7 +1329,8 @@ def _help(win):
         "  e                 edit the backlog item or the spec → $EDITOR",
         "  n                 next waiting item",
         "  r                 run / resume the pipeline         → tl-run   (confirm)",
-        "  g                 resolve the delivery gate         → tl-deliver (confirm)",
+        "  g                 grill an un-grilled backlog item  → tl-grill  (confirm)",
+        "                    …or resolve the delivery gate     → tl-deliver (confirm)",
         "  p                 peek the worker's output          → $PAGER",
         "  / :               filter · command (view 3)",
         "  ? q               this help · quit",
@@ -1536,8 +1548,14 @@ def _loop(win):
             if _confirm(win, "Run pipeline: tl-run %s  (its own approve/reject prompts)" % slug):
                 _shell_out(win, [os.path.join(BIN, "tl-run.sh"), slug])
             q = recompute()
-        elif ch == ord("g") and target and target.task.startswith("tl-"):
-            if _confirm(win, "Resolve gate: tl-deliver %s  (approve/skip/fix per finding)" % target.task):
+        elif ch == ord("g") and target:
+            if not target.task.startswith("tl-"):
+                # never grilled: run the grill ALONE, so the questions land here to answer. `r` is
+                # still the whole pipeline (grill → brief → spawn), which dispatches a worker.
+                if _confirm(win, "Grill '%s': tl-grill %s  (one model call; no worker is dispatched)"
+                            % (target.slug, target.slug)):
+                    _shell_out(win, [os.path.join(BIN, "tl-grill.sh"), target.slug])
+            elif _confirm(win, "Resolve gate: tl-deliver %s  (approve/skip/fix per finding)" % target.task):
                 _shell_out(win, [os.path.join(BIN, "tl-deliver.sh"), target.task])
             q = recompute()
 

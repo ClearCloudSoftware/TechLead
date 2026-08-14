@@ -11,7 +11,7 @@ fail() { echo "FAIL: $1"; exit 1; }
 WORK="$(mktemp -d)"
 export TL_HOME="$REPO" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_LEAD="$WORK/lead"
 export TL_WORKTREES="$WORK/state/wt" TL_BACKLOG="$WORK/data/backlog.md"
-export TL_TOP_INTERVAL=1
+export TL_TOP_INTERVAL=1 TL_GRILL_CMD="$REPO/test/demo-grill.sh"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$TL_DATA/tl-add-search" "$TL_STATE" "$TL_LEAD"
 
@@ -171,6 +171,18 @@ want(screen, "what happens to the old index", "the prompt label carries the ques
 want(screen, "enter commit", "answer prompt shows its keys")
 screen = send("use the existing index; drop the old one behind a flag\n", 3.0)
 
+# an un-grilled backlog item must be grillable from here: g, confirm, and its questions land in
+# the inbox to answer — without dispatching a worker, which is what `r` would do.
+send(" ")                                  # the answer left a notice; it eats the next keypress
+screen = send("/backlog\n", 1.5)
+want(screen, "csv-export", "filter down to the un-grilled item")
+screen = send("g", 1.5)
+want(screen, "tl-grill csv-export", "g on a backlog row must offer to grill it")
+want(screen, "no worker is dispatched", "...and say it does not dispatch")
+send("y", 4.0)
+send("/\n", 1.5)                            # clear the filter
+screen = drain(2.0)
+
 send("q", 1.0)
 try:
     p.wait(timeout=5)
@@ -201,4 +213,10 @@ grep -q 'tl-add-search' "$TL_DATA/metrics.tsv" 2>/dev/null \
   || fail "V3: tl-grill's D13 metric did not fire — tl-top bypassed the command path"
 echo "  V3 ok — the command path ran (metric recorded), so its refusals still apply"
 
-echo "PASS: tl-top three views render, and d answers a question end-to-end via tl-grill"
+grep -q '^q: q2|open|' "$TL_DATA/tl-csv-export/spec.md" 2>/dev/null \
+  || fail "V4: 'g' did not grill the backlog item — no spec at $TL_DATA/tl-csv-export/spec.md"
+[ ! -f "$TL_STATE/tl-csv-export.meta" ] \
+  || fail "V4: grilling must NOT dispatch a worker — that is what 'r' is for"
+echo "  V4 ok — g grilled an un-grilled backlog item, and dispatched nothing"
+
+echo "PASS: tl-top three views render, d answers a question, and g grills a backlog item"

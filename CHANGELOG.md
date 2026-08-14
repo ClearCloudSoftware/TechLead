@@ -27,6 +27,10 @@ use (§4).
     raises with `d`/`l`/`s`, then `r` to dispatch. `g` stays the gate on a dispatched task — the two
     can never both apply, and the footer names whichever the row answers to. Unlike `r`, it
     dispatches no worker.
+  - Answering leaves you ready for the next one: the answered row disappears, the next open
+    question is already selected, and `d`/`l`/`s` acts on it immediately — the result message no
+    longer consumes a keypress. Open questions are ordered numerically, so `q10` comes after `q9`
+    rather than between `q1` and `q2`.
   - Answered questions deliberately have **no inbox row** (nothing is waiting on them); `:q <slug>`
     is where you reach one to correct it.
   - `test/tl-top-views-smoke.sh` drives the real curses UI in a **pty** — the pure-model selftest

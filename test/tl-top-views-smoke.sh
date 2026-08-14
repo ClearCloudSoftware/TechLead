@@ -34,6 +34,7 @@ state: drafted
 grilled_at: 2026-08-14
 outcome:
 q: q1|decided|inferred|2026-08-14|use the existing pg index, no new service
+q: q3|open|owner|2026-08-14|Who signs off the index rebuild window?
 q: q4|decided|inferred|2026-08-14|Answer 4 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
 q: q5|decided|inferred|2026-08-14|Answer 5 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
 q: q6|decided|inferred|2026-08-14|Answer 6 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
@@ -42,7 +43,7 @@ q: q8|decided|inferred|2026-08-14|Answer 8 - this one runs long on purpose: it h
 q: q9|decided|inferred|2026-08-14|Answer 9 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
 q: q10|decided|inferred|2026-08-14|Answer 10 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
 q: q11|decided|inferred|2026-08-14|Answer 11 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
-q: q3|open|inferred|2026-08-14|What happens to the old index while the new one builds, and who owns the rollback if the migration has to be abandoned halfway through a busy weekday afternoon with three other services already depending on it?
+q: q2|open|inferred|2026-08-14|What happens to the old index while the new one builds, and who owns the rollback if the migration has to be abandoned halfway through a busy weekday afternoon with three other services already depending on it?
 ---
 # Add full-text search
 EOF
@@ -120,28 +121,28 @@ screen = drain(2.0)
 want(screen, "[1 inbox]", "launch")
 want(screen, "question", "launch")
 want(screen, "tl-add-search", "launch")
-want(screen, "q3", "launch")
+want(screen, "q2", "launch")
 want(screen, "never grilled", "launch: un-grilled backlog item must show")
 want(screen, "csv-export", "launch")
 want(screen, "already decided here", "launch: the detail pane counts what is settled")
 # the reported bug: a long question was truncated at the window edge in all three views.
 # The table row still truncates (that is what makes it a table) — the detail pane must not.
 want(screen, "services already depending on it?", "launch: long question must WRAP in the pane")
-if screen.count("● question") != 1:
-    bad.append("launch: exactly one question row expected (q1 is answered, so it must not be a "
-               "row) — got %d" % screen.count("● question"))
+if screen.count("● question") != 2:
+    bad.append("launch: two question rows expected (q2 and q3 are open; q1 is not) — got %d"
+               % screen.count("● question"))
 
 # the fallback row types (decision/ready/review/blocked/failed) keep their text ONLY in `detail`;
 # the pane used to draw a rule and then jump straight to peek output, leaving the truncated table
 # row as the only copy.
-screen = send("j")
+screen = send("jj")                        # past both question rows, onto the parked worker
 want(screen, "worker asks", "a parked worker must produce a decision row")
 want(screen, "depend on it?", "inbox: a decision row's question must WRAP in the pane")
 # parallel workers each have their own worktree + branch; the row has to say which
 want(screen, "tl/tl-oauth", "inbox: a dispatched row must name its branch")
 want(screen, "worktree", "inbox: ...and its worktree")
 want(screen, "worktree gone", "a released/never-made worktree is called out, not silently blank")
-send("k")
+send("kk")
 
 screen = send("2")
 want(screen, "open question", "view 2 briefing")
@@ -157,7 +158,7 @@ want(screen, "tl/tl-oauth", "':fleet' must show the branch")
 screen = send(":q add-search\n", 1.5)
 want(screen, "q1", "view 3 :q lists answered questions too")
 want(screen, "inferred", "view 3 :q")
-screen = send("j" * 14)                    # q3 (the long one) is the last row here
+screen = send("j" * 20)                    # q2 (the long one) is last in file order
 want(screen, "services already depending on it?", "view 3 detail pane must wrap the question")
 want(send("?"), "renders, never mutates", "help overlay")
 send(" ")                                  # dismiss help
@@ -166,10 +167,16 @@ screen = send("1")
 want(screen, "WHAT", "back to view 1 repaints the inbox table")
 want(screen, "never grilled", "back to view 1")
 screen = send("d", 1.5)                    # answer the open question
-want(screen, "answer q3", "answer prompt opens")
+want(screen, "answer q2", "answer prompt opens")
 want(screen, "what happens to the old index", "the prompt label carries the question")
 want(screen, "enter commit", "answer prompt shows its keys")
 screen = send("use the existing index; drop the old one behind a flag\n", 3.0)
+
+# THE RHYTHM: the answered row vanishes, the next open question is already selected, and `d` must
+# act on it straight away. A notice that consumes the keypress costs a key exactly here.
+screen = send("d", 2.0)
+want(screen, "answer q3", "d must act immediately after an answer — the result notice must not eat it")
+send("\x1b", 1.0)                           # esc: leave q3 open
 
 # an un-grilled backlog item must be grillable from here: g, confirm, and its questions land in
 # the inbox to answer — without dispatching a worker, which is what `r` would do.
@@ -199,14 +206,16 @@ PY
 
 echo "  V1 ok — all three views painted, help overlay, prompt opened"
 
-grep -q '^q: q3|decided|owner|' "$TL_DATA/tl-add-search/spec.md" \
-  || fail "V2: the answer never reached spec.md — got: $(grep '^q: q3' "$TL_DATA/tl-add-search/spec.md")"
+grep -q '^q: q2|decided|owner|' "$TL_DATA/tl-add-search/spec.md" \
+  || fail "V2: the answer never reached spec.md — got: $(grep '^q: q2' "$TL_DATA/tl-add-search/spec.md")"
 grep -q 'drop the old one behind a flag' "$TL_DATA/tl-add-search/spec.md" \
   || fail "V2: the typed text is not in spec.md"
 grep -q '^q: q1|decided|inferred|' "$TL_DATA/tl-add-search/spec.md" \
-  || fail "V2: answering q3 disturbed q1"
-[ "$("$REPO/bin/tl-spec.sh" open-count tl-add-search)" -eq 0 ] \
-  || fail "V2: q3 is still open after answering it"
+  || fail "V2: answering q2 disturbed q1"
+[ "$("$REPO/bin/tl-spec.sh" open-count tl-add-search)" -eq 1 ] \
+  || fail "V2: expected exactly q3 still open (q2 answered, q3's prompt was cancelled with esc)"
+grep -q '^q: q3|open|' "$TL_DATA/tl-add-search/spec.md" \
+  || fail "V2: esc at the prompt must write nothing — q3 should still be open"
 echo "  V2 ok — the prompt's text reached spec.md through the real tl-grill answer"
 
 grep -q 'tl-add-search' "$TL_DATA/metrics.tsv" 2>/dev/null \

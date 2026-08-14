@@ -243,6 +243,13 @@ _QRANK = {
 }
 
 
+def qid_key(qid):
+    """Sort qids as numbers, not strings: as a spec grows past nine questions, plain string order
+    puts q10 between q1 and q2, so working down the open list jumps around."""
+    m = re.match(r"^([^0-9]*)(\d+)(.*)$", qid or "")
+    return (m.group(1), int(m.group(2)), m.group(3)) if m else (qid or "", 0, "")
+
+
 def slugify(s):
     """Mirror of tl-grill.sh's slugify — the id is 'tl-' + this, so it must not drift."""
     out = "".join(c if c.isalnum() else "-" for c in s.lower())
@@ -340,7 +347,7 @@ def build_queue_model(state_dir, data_dir, state_of, backlog_items):
         else:
             q.quiet.append(r)     # working / paused — nothing needed, so it recedes to one line
 
-    q.rows.sort(key=lambda r: (r.rank, r.task, r.qid))
+    q.rows.sort(key=lambda r: (r.rank, r.task, qid_key(r.qid)))
     return q
 
 
@@ -434,7 +441,8 @@ def _selftest():
     spec_file("tl-open", "---\nid: tl-open\nstate: drafted\ntitle: Open item\n"
                          "q: q1|decided|inferred|2026-08-14|keep the old path\n"
                          "q: q3|open|inferred|2026-08-14|what happens to the old index?\n"
-                         "q: q7|open|inferred|2026-08-14|who owns the migration?\n---\n")
+                         "q: q7|open|inferred|2026-08-14|who owns the migration?\n"
+                         "q: q10|open|inferred|2026-08-14|what does the rollback cost?\n---\n")
     # fully answered, never dispatched -> one ready row
     spec_file("tl-ready", "---\nid: tl-ready\nstate: specified\ntitle: Ready item\n"
                           "q: q1|decided|owner|2026-08-14|do it the simple way\n---\n")
@@ -451,9 +459,12 @@ def _selftest():
 
     whats = [(r.what, r.task, r.qid) for r in q.rows]
     check(whats[0] == ("gate", "tl-a", ""), "gate must rank first, got %r" % (whats[:1],))
-    check([w for w in whats if w[0] == "question"]
-          == [("question", "tl-open", "q3"), ("question", "tl-open", "q7")],
-          "one row per OPEN question, in qid order: %r" % whats)
+    check([w[2] for w in whats if w[0] == "question"] == ["q3", "q7", "q10"],
+          "one row per OPEN question, in NUMERIC qid order (q10 last, not between q1 and q2): %r"
+          % [w[2] for w in whats if w[0] == "question"])
+    check(qid_key("q10") > qid_key("q9") and qid_key("q2") < qid_key("q10")
+          and qid_key("") == ("", 0, "") and qid_key("qi1") > qid_key("q9"),
+          "qid_key: numeric within a prefix, and it must not choke on '' or the qi<n> form")
     check(("ready", "tl-ready", "") in whats, "fully-answered + undispatched -> a ready row")
     check(("backlog", "fresh", "") in whats, "un-grilled backlog item -> a backlog row")
     check(not [w for w in whats if w[1] == "tl-nope"], "a rejected item must produce no row")
@@ -461,7 +472,8 @@ def _selftest():
     # decisions TechLead exists to slow down (gate findings, grill questions) sit above everything,
     # and un-grilled backlog items sink to the bottom.
     check(whats == [("gate", "tl-a", ""), ("question", "tl-open", "q3"),
-                    ("question", "tl-open", "q7"), ("decision", "tl-b", ""),
+                    ("question", "tl-open", "q7"), ("question", "tl-open", "q10"),
+                    ("decision", "tl-b", ""),
                     ("failed", "tl-e", ""), ("review", "tl-f", ""),
                     ("ready", "tl-ready", ""), ("backlog", "fresh", "")],
           "queue order wrong: %r" % (whats,))
@@ -474,7 +486,7 @@ def _selftest():
 
     items = {i[0]: i for i in q.items}
     check(items["fresh"][3] == "backlog" and items["fresh"][2] == "", "never-grilled item stage")
-    check(items["open"][3] == "drafted" and items["open"][4] == 2, "open item: stage + open count")
+    check(items["open"][3] == "drafted" and items["open"][4] == 3, "open item: stage + open count")
     check(items["ready"][3] == "specified" and items["ready"][4] == 0, "ready item: stage + 0 open")
     check(items["nope"][3] == "rejected", "rejected item keeps its stage in the item list")
     check(items["a"][2] == "tl-a", "slug -> id join is 'tl-' + slugify(slug)")
@@ -496,13 +508,13 @@ def _selftest():
     _c, _h, mrows = modal_table("q", "open", q, data_dir, lead_dir)
     targets = [r[1] for r in mrows]
     check([(t.task, t.qid) for t in targets]
-          == [("tl-open", "q1"), ("tl-open", "q3"), ("tl-open", "q7")],
+          == [("tl-open", "q1"), ("tl-open", "q3"), ("tl-open", "q7"), ("tl-open", "q10")],
           "':q <slug>' must list EVERY question — the answered ones are only reachable here: %r"
           % [(t.task, t.qid) for t in targets])
     # the accept-or-correct rule: an answered question seeds the prompt with its answer, an open
     # one starts empty (spec.md's 5th field is the QUESTION while open — see seed_for).
     check(targets[0].seed == "keep the old path", "answered question must seed the prompt with its answer")
-    check(targets[1].seed == "" and targets[2].seed == "", "an OPEN question must seed empty")
+    check(all(t.seed == "" for t in targets[1:]), "an OPEN question must seed empty")
     keys = {r.key for r in q.rows}
     check(all("question|%s|%s" % (t.task, t.qid) in keys for t in targets[1:]),
           "an open question's modal row must resolve to a real queue row (the cursor carries on it)")
@@ -1476,10 +1488,13 @@ def _loop(win):
             ch = win.getch()
         except KeyboardInterrupt:
             return
-        if ch != -1 and st["notice"]:
+        if ch != -1:
+            # A keypress clears the last result and STILL acts. Swallowing it (so the message was
+            # "acknowledged") costs a key exactly where the rhythm is d, type, enter, d, type… —
+            # you answer, the row vanishes, the next one is already selected, and the d meant for
+            # it disappears into dismissing a message you had already read. The notice stays put
+            # across refresh ticks, so nothing is missed by not consuming a key for it.
             st["notice"] = ""
-            if ch not in (ord("q"), ord("Q")):
-                continue                      # the dismissing keypress is not also an action
 
         sel = rows[_index_of(rows, st["cursor"])] if rows else None
         target = _current_target(st, q, rows, data_dir)

@@ -31,14 +31,33 @@ echo "tl: kickoff interview for '$name' — the lead asks one question at a time
 echo "tl: (blank line + Enter, or Ctrl-D, pauses — re-run tl-kickoff to resume from where you left off.)" >&2
 
 tdir="$(mktemp -d)"; trap 'rm -rf "$tdir"' EXIT
+
+# Live token streaming (#114): on by default for the shipped claude adapter at a tty, so the turn forms
+# token-by-token instead of sitting behind a several-second spinner. The adapter then streams the turn
+# to stderr and the loop must NOT re-echo it. A caller override (TL_KICKOFF_STREAM) always wins; any
+# non-tty / other adapter (demo, opencode) falls back to the spinner-then-echo path unchanged.
+# TL_KICKOFF_STREAM is the single source of truth, honoured by both loop and adapter.
+stream="${TL_KICKOFF_STREAM:-}"
+if [ -z "$stream" ]; then
+  stream=0
+  case "$cmd" in *claude-kickoff.sh) if [ -t 2 ]; then stream=1; fi ;; esac
+fi
+export TL_KICKOFF_STREAM="$stream"
+
 max="${TL_KICKOFF_MAX:-10}"; turn=0
 while :; do
   turn=$((turn+1))
   [ "$turn" -le "$max" ] || { tl_log "hit the question cap ($max) — re-run to continue if it didn't wrap up"; exit 0; }
   # Each turn is a model call of a few seconds; via a file, not `$( )`, so it can run under a spinner
   # (tl_spin cannot show a command substitution — see its contract in tl-common.sh).
-  tl_spin "the lead is thinking…" sh -c "'$cmd' < '$transcript' > '$tdir/turn.out'" \
-    || tl_die "kickoff driver failed"
+  if [ "$stream" = 1 ]; then
+    # Streaming: no spinner — the adapter writes live tokens to stderr after this label; stdout → file.
+    printf '\nLEAD: ' >&2
+    "$cmd" < "$transcript" > "$tdir/turn.out" || tl_die "kickoff driver failed"
+  else
+    tl_spin "the lead is thinking…" sh -c "'$cmd' < '$transcript' > '$tdir/turn.out'" \
+      || tl_die "kickoff driver failed"
+  fi
   out="$(cat "$tdir/turn.out")"
   [ -n "$out" ] || tl_die "the kickoff driver returned nothing (harness/adapter misconfigured?) — check TL_KICKOFF_CMD"
   case "$out" in
@@ -96,8 +115,11 @@ while :; do
       exit 0 ;;
     *)               # a question: show it, record it, capture the owner's answer
       # Framed so the lead's question is visibly not your own typing — this is a conversation, and
-      # the two used to run together as undifferentiated text.
-      if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+      # the two used to run together as undifferentiated text. When streaming, the adapter already
+      # printed the question live (after the 'LEAD: ' label above), so re-echoing it would double it.
+      if [ "$stream" = 1 ]; then
+        printf '\n' >&2                       # close the streamed line before the input prompt
+      elif [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
         echo >&2
         gum style --border rounded --border-foreground 212 --padding "0 1" --width 78 \
           "LEAD  $out" >&2

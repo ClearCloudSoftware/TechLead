@@ -53,6 +53,10 @@ It asks one question (harness: `claude` or `opencode`) and writes `config/instan
 export TL_WORKER_CMD="${TL_WORKER_CMD:-$TL_HOME/adapters/claude-worker.sh}"
 export TL_GRILL_CMD="${TL_GRILL_CMD:-$TL_HOME/adapters/claude-grill.sh}"
 export TL_GRILL_PROPOSE_CMD="${TL_GRILL_PROPOSE_CMD:-$TL_HOME/adapters/claude-grill-propose.sh}"
+export TL_SCAFFOLD_TEST_CMD="${TL_SCAFFOLD_TEST_CMD:-$TL_HOME/adapters/claude-scaffold-test.sh}"
+export TL_SPECDIFF_CMD="${TL_SPECDIFF_CMD:-$TL_HOME/adapters/claude-specdiff.sh}"
+export TL_STANDARDS_CMD="${TL_STANDARDS_CMD:-$TL_HOME/adapters/claude-standards.sh}"
+export TL_ANSWER_CMD="${TL_ANSWER_CMD:-$TL_HOME/adapters/claude-answer.sh}"
 ```
 
 Conditional assignments — anything already exported in your shell **wins over the file**. Every
@@ -61,32 +65,38 @@ Conditional assignments — anything already exported in your shell **wins over 
 Put the two `export`s in your `~/.zshrc`. They are not persisted by `tl-init`.
 
 <details>
-<summary><b>Finer grain</b> — skip the wizard, and the three vars it doesn't write</summary>
+<summary><b>Finer grain</b> — what each adapter turns on, and the token-free dry run</summary>
 
-`tl-init` is pure convenience; the manual equivalent is exporting `TL_WORKER_CMD` and
-`TL_GRILL_CMD` yourself. Useful when you want the token-free dry run:
+`tl-init` is pure convenience; the manual equivalent is exporting the vars yourself. Useful when you
+want a dry run with no agent and no tokens at all:
 
 ```sh
-export TL_WORKER_CMD="$TL_HOME/test/demo-worker.sh"   # no agent, no tokens
+export TL_WORKER_CMD="$TL_HOME/test/demo-worker.sh"
 export TL_GRILL_CMD="$TL_HOME/test/demo-grill.sh"
 ```
 
-**Three adapters exist that `tl-init` does not wire.** They fail closed with a named error rather
-than degrading silently, so nothing breaks — but the features stay dark until you export them:
+What each one turns on — every adapter fails closed with a named error rather than degrading
+silently, so an unset one costs you the feature, never correctness:
 
-| Var | Enables | Adapter |
-|---|---|---|
-| `TL_SPECDIFF_CMD` | the Spec review axis — *did the change do what the spec decided?* Folds into **every change gate** when set, and into `tl-review`. | `adapters/claude-specdiff.sh` |
-| `TL_STANDARDS_CMD` | the Standards review axis (advisory craft review), in `tl-review` only | `adapters/claude-standards.sh` |
-| `TL_ANSWER_CMD` | the `answer` kind (`tl-answer "why did we…"`) | `adapters/claude-answer.sh` |
+| Var | Enables |
+|---|---|
+| `TL_WORKER_CMD` | the coding worker itself |
+| `TL_GRILL_CMD` | the grill's inference pass over your question bank |
+| `TL_GRILL_PROPOSE_CMD` | auto-drafting candidate questions at the empty-bank stop (Step 5) |
+| `TL_SCAFFOLD_TEST_CMD` | `tl-scaffold-test` drafting a `test.sh` from your backlog (Step 3) |
+| `TL_SPECDIFF_CMD` | the Spec axis — *did the change do what the spec decided?* Folds into **every change gate**, and into `tl-review` |
+| `TL_STANDARDS_CMD` | the Standards axis (advisory craft review), `tl-review` only |
+| `TL_ANSWER_CMD` | the `answer` kind (`tl-answer "why did we…"`) |
 
-`TL_SPECDIFF_CMD` is the one worth setting early — it is TechLead's actual differentiator, and
-without it the gate only checks tests, scope, and danger paths.
+`TL_SPECDIFF_CMD` is the load-bearing one. `tl-gate` calls the Spec axis with `|| true`, so an unset
+judge **silently skips it** — the gate would check tests, scope, and paths but never the spec's
+`decided` answers, which is the part that makes it more than a `git merge`.
 
-For opencode instead of Claude: `tl-init` writes the two opencode adapters and prompts for
+**Using opencode instead?** `tl-init` writes the two opencode adapters and prompts for
 `TL_OPENCODE_MODEL` (must support tool-calling; `ollama/qwen3-coder:30b` is the validated local
-pick). There is no opencode *proposer*, so Step 5's auto-draft doesn't fire — you seed
-`lead/questions.md` by hand.
+pick). The other five have no opencode adapter yet, so they stay unset: Step 3 means writing
+`test.sh` by hand, Step 5 means seeding `lead/questions.md` by hand, and the gate runs without the
+Spec axis.
 </details>
 
 ---
@@ -213,6 +223,35 @@ A worker gets an isolated worktree branched from `HEAD`. An uncommitted harness 
 it *and* to the gate — and your baseline, captured against the working tree, would then measure
 something neither ever sees. `tl-baseline` and `tl-spawn` both warn on a dirty tree for exactly this
 reason. Take the warning seriously.
+
+<details>
+<summary><b>Finer grain</b> — let TechLead draft the harness (<code>tl-scaffold-test</code>)</summary>
+
+If you'd rather not start from a blank file, `tl-scaffold-test` drafts one *from your backlog*. That
+means writing the backlog item first — so you'd do Step 5's `cat >>` before this, then:
+
+```sh
+tl-scaffold-test.sh habit
+```
+
+```
+tl: drafted /Users/you/projects/habit/test.sh  and set test_command='sh test.sh'.
+tl: REVIEW it — a test defines what 'done' means, which is yours to approve. Then, in order:
+      $EDITOR test.sh
+      git add test.sh && git commit -m 'add test harness'
+      tl-baseline habit
+```
+
+It writes `test.sh`, sets `test_command`, and **stops**. It never baselines for you and never
+overwrites an existing `test.sh` — what "done" means is the one thing it won't decide.
+
+Read every line before committing. A harness you didn't read is a definition of "correct" you didn't
+choose, and every gate from here on is measured against it. This is the same trap as rubber-stamping
+the question bank in Step 5, one layer down.
+
+Existing repo with a real test runner? You don't need this — `tl-detect` / `tl-onboard` already set
+`test_command` from the stack they found.
+</details>
 
 ---
 
@@ -494,13 +533,12 @@ is unresolved or marked `fix`. With no tty and no `TL_APPROVE`, it leaves findin
 blocks rather than defaulting to approve.
 
 ```sh
-tl-teardown.sh tl-add-habit --force     # release the worktree; report.md survives
+tl-teardown.sh tl-add-habit     # release the worktree; report.md survives
 ```
 
-> **Rough edge (`mode=local-only`, which is `tl-new`'s default).** Teardown's undelivered-work guard
-> checks for a recorded **PR**, not for delivery. After a fast-forward merge there is no PR, so it
-> refuses despite the work being merged — hence `--force` above. Verify with
-> `git log --oneline -1 main` before forcing. In `mode=pr` the guard behaves as intended.
+Teardown refuses on a dirty worktree, or on commits that never left it — it keys on the `delivered`
+marker `tl-deliver` records for both paths (`ff-merge:<branch>` and `pr:<url>`), so a merged branch
+tears down cleanly and genuinely undelivered work doesn't. `--force` overrides both guards.
 
 <details>
 <summary><b>Finer grain</b> — the gate stages, and the standalone review kind</summary>
@@ -520,8 +558,6 @@ TL_APPROVE=yes TL_RESOLVE=approve tl-deliver.sh tl-add-habit   # non-interactive
 parallel sub-agents so nits never drown intent:
 
 ```sh
-export TL_SPECDIFF_CMD="$TL_HOME/adapters/claude-specdiff.sh"
-export TL_STANDARDS_CMD="$TL_HOME/adapters/claude-standards.sh"
 tl-review.sh tl-add-habit          # → data/<id>/review-draft.md
 ```
 
@@ -536,18 +572,14 @@ tl-review.sh tl-add-habit          # → data/<id>/review-draft.md
 **The `answer` kind** — ask your own written record a question, with a citation per claim:
 
 ```sh
-export TL_ANSWER_CMD="$TL_HOME/adapters/claude-answer.sh"
 tl-answer.sh "why did we put habits in a flat file instead of sqlite?"
+tl-answer.sh "what did we decide about storage?" ./CONTEXT.md    # widen the corpus
 ```
 
-Corpus: `lead/decisions/` + specs + `lead/principles.md`. Not briefs, not the backlog. It answers
+Corpus: this project's `lead/decisions/` + its grill specs + `lead/principles.md`, plus an optional
+context file. Not briefs, not the backlog — those are throwaway or not-yet-decisions. It answers
 "I don't know — no basis in your notes" rather than manufacturing a guess, and flags superseded ADRs
 instead of quoting them as live.
-
-> **Rough edge.** `tl-answer` still reads specs from `$TL_HOME/data/*/spec.md`, the pre-per-project
-> path. On a project whose specs live in `<project>/.techlead/data/`, only `lead/decisions/` and
-> `principles.md` reach the corpus. Pass a context file as the second argument to widen it until this
-> is fixed.
 </details>
 
 ---
@@ -589,7 +621,7 @@ tl-spec.sh set tl-add-habit outcome "q3 missed the empty-file case — reverted"
 
 ## Command index
 
-All 40 scripts in `bin/`. Bold entries are the greenfield path.
+All 41 scripts in `bin/`. Bold entries are the greenfield path.
 
 **Setup and registration**
 
@@ -600,6 +632,7 @@ All 40 scripts in `bin/`. Bold entries are the greenfield path.
 | `tl-onboard` | brownfield: register an existing repo in place, detect defaults, baseline it |
 | **`tl-project`** | single owner of the registry — `get`/`set`/`path` per key |
 | **`tl-baseline`** | capture the known-failing set; promotes `survey` → `ready` |
+| `tl-scaffold-test` | greenfield only: draft `test.sh` from the backlog, set `test_command`, then stop |
 | `tl-detect` | suggest one default (mode/branch/test-command/danger-paths) or stay silent |
 | `tl-wizard` | *(sourced)* prompt helpers; `TL_YES` / `TL_ANSWER_<KEY>` make wizards scriptable |
 
@@ -676,9 +709,12 @@ All 40 scripts in `bin/`. Bold entries are the greenfield path.
 | `TL_WORKER_CMD` | worker adapter |
 | `TL_GRILL_CMD` | grill inference driver |
 | `TL_GRILL_PROPOSE_CMD` | question proposer; enables the auto-draft at the empty-bank stop |
-| `TL_SPECDIFF_CMD` | Spec axis — **not wired by `tl-init`**; set it to arm the gate's spec check |
-| `TL_STANDARDS_CMD` | Standards axis — not wired by `tl-init` |
-| `TL_ANSWER_CMD` | `answer` kind engine — not wired by `tl-init` |
+| `TL_SCAFFOLD_TEST_CMD` | harness drafter behind `tl-scaffold-test` |
+| `TL_SPECDIFF_CMD` | Spec axis — arms the gate's spec check. Unset = the gate silently skips it |
+| `TL_STANDARDS_CMD` | Standards axis, `tl-review` only |
+| `TL_ANSWER_CMD` | `answer` kind engine |
+
+All seven are written by `tl-init` for the `claude` harness; `opencode` gets the first two.
 | `TL_DATA` / `TL_STATE` / `TL_LEAD` / `TL_WORKTREES` | override resolved paths (default: nearest `.techlead/`) |
 | `TL_BACKLOG` | backlog path (default `<project>/.techlead/data/backlog.md`) |
 | `TL_PROJECTS_DIR` | fixed home for `tl-new` instead of `$PWD` |

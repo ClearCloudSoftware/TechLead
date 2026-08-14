@@ -12,25 +12,7 @@ TAB="$(printf '\t')"
 
 slugify() { printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//'; }
 
-# bump_hits <questions-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry
-# (1-indexed in file order — the same numbering the grill adapter shows the model). Out-of-range
-# ordinals simply don't match, so a garbled ref is a silent no-op. Single owner of the hits: write.
-bump_hits() {
-  local qfile="$1"; shift
-  [ -f "$qfile" ] || return 0
-  local ords date tmp
-  ords=" $* "; date="$(date -u +%Y-%m-%d)"; tmp="$(mktemp)"
-  awk -v ords="$ords" -v date="$date" '
-    /^### /{ sec++ }
-    /^hits:/ && index(ords, " " sec " ") > 0 {
-      sub(/hits:[[:space:]]*[0-9]+/, "hits: " ($2 + 1))
-      sub(/last:[[:space:]]*[^[:space:]].*/, "last: " date)
-    }
-    { print }
-  ' "$qfile" > "$tmp" && mv "$tmp" "$qfile"
-}
-
-_finalize() {  # id — set state from open-count, then report
+_finalize() {  # id — set state from open-count, then report  (bump_hits lives in tl-common.sh)
   local id="$1" open total
   open="$("$BIN/tl-spec.sh" open-count "$id")"
   total="$("$BIN/tl-spec.sh" qlist "$id" | awk 'END{print NR}')"

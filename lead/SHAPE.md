@@ -66,8 +66,10 @@ hits: 0   last: —          # per-rule reuse counter (E6.3/D4) — bump when th
 Every rule and every question carries `hits: N  last: <date>`. Bump it when the rule fires during a
 grill (an inferred answer it justified) or a review. Reuse-rate is the **early risk-1 signal**: a
 stable core of rules that keep firing = judgment captured; a pile of once-used rules = a generic
-engineer with a notebook (risk 2). Kept by hand for now (code-free track); the reuse count feeds the
-D13 kill-gate alongside `tl-metric` time. No script until there are rules to count — YAGNI.
+engineer with a notebook (risk 2). Auto-bumped now: a grill bumps the `questions.md` entries it drew
+answers from, and a review bumps the `review-rubric.md` rules its findings cited (the driver reports
+which via a numbered ref; `bump_hits` in `tl-common.sh` is the single owner of the write). The reuse
+count feeds the D13 kill-gate alongside `tl-metric` time.
 
 ## Consolidation (E6.6) — the promote-and-prune routine
 

@@ -14,15 +14,27 @@ case "${1:?usage: tl-standards run|findings|report ID}" in
     id="${2:?}"; wt="$(tl_meta_get "$id" worktree)"; base="$(tl_meta_get "$id" base)"; pname="$(tl_meta_get "$id" pname)"
     ppath="$("$BIN/tl-project.sh" get "$pname" path 2>/dev/null || true)"
     : "${TL_STANDARDS_CMD:?tl: no Standards reviewer — set TL_STANDARDS_CMD (e.g. adapters/claude-standards.sh)}"
-    # the repo's documented standards: AGENTS.md (canonical, §2.7 + q3) + this instance's review-rubric.md
+    # the repo's documented standards: AGENTS.md (canonical, §2.7 + q3) + this instance's review-rubric.md.
+    # The rubric rules are NUMBERED ([N] on each `### `) so the reviewer can point a finding back at the
+    # rule it applied (4th field) — that drives the review-side hits: counter, the mirror of the grill's.
     std="$(mktemp)"
     for f in "$ppath/AGENTS.md" "$TL_LEAD/review-rubric.md"; do
-      [ -f "$f" ] && { printf '\n# from %s\n' "$f"; cat "$f"; } >> "$std"
+      [ -f "$f" ] || continue
+      printf '\n# from %s\n' "$f" >> "$std"
+      if [ "$f" = "$TL_LEAD/review-rubric.md" ]; then
+        awk '/^### /{n++; sub(/^### /,"[" n "] ### ")} {print}' "$f" >> "$std"
+      else cat "$f" >> "$std"; fi
     done
     diff="$(mktemp)"; git -C "$wt" --no-pager diff "$base"..HEAD > "$diff" 2>/dev/null || true
     ff="$(ff_path "$id")"; mkdir -p "$(dirname "$ff")"
-    TL_ST_ID="$id" TL_ST_STANDARDS="$std" TL_ST_DIFF="$diff" $TL_STANDARDS_CMD > "$ff" || true
-    rm -f "$std" "$diff"
+    raw="$(mktemp)"
+    TL_ST_ID="$id" TL_ST_STANDARDS="$std" TL_ST_DIFF="$diff" $TL_STANDARDS_CMD > "$raw" || true
+    # hits: bump — a review-rubric rule that justified a finding has fired (§2.6). Bump each cited rule
+    # number, then store findings WITHOUT the 4th field so downstream (report/compose) is unchanged.
+    refs="$(awk -F'\t' 'NF>=4 && $4 ~ /^[0-9]+$/{print $4}' "$raw" | sort -un)"
+    if [ -n "$refs" ]; then bump_hits "$TL_LEAD/review-rubric.md" $refs; fi
+    cut -f1-3 "$raw" > "$ff"
+    rm -f "$std" "$diff" "$raw"
     v="$(awk -F'\t' '$1=="standards-violation"{c++} END{print c+0}' "$ff")"
     s="$(awk -F'\t' '$1=="standards-smell"{c++} END{print c+0}' "$ff")"
     echo "tl: standards axis — $((v+s)) finding(s): $v documented-violation, $s smell (draft, non-blocking)" >&2

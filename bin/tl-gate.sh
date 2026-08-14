@@ -81,7 +81,7 @@ git -C "$wt" --no-pager diff --stat "$base"..HEAD 2>/dev/null | sed 's/^/  /' ||
 # D13 approval input (E1.5). A clean change (0 findings) costs ~no owner time, so nothing is recorded.
 if [ "$count" -gt 0 ]; then
   t0="$(date +%s)"
-  jq -r '.[]|"  ["+.id+"] "+.rule+": "+.detail' "$findings"
+  jq -r '.[]|[.id,.class,.rule,.detail]|@tsv' "$findings" | tl_table "ID,CLASS,RULE,DETAIL"
   if [ "${TL_APPROVE:-}" = "yes" ]; then
     jq --arg r "${TL_RESOLVE:-approve}" 'map(.resolved=$r)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
   # The braces matter: `exec 3</dev/tty 2>/dev/null` applies BOTH redirections to the current shell

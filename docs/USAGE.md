@@ -19,7 +19,9 @@ for zero tokens while idle, grill a backlog item into a spec, and deliver a revi
   prompt — the wizards, the grill walk, gate resolution — upgrades to a real picker when one is on
   `PATH`, and falls back to a numbered menu when neither is. Nothing requires them.
 - Output is colourised only when stdout is a terminal; `NO_COLOR=1` turns it off. Piped or captured
-  output is plain, so scripts and greps see exactly what they saw before.
+  output is plain, so scripts and greps see exactly what they saw before. Question and finding lists
+  render as a `gum table` when gum is installed — `TL_NO_TABLE=1` forces the plain aligned form,
+  which is better in a narrow terminal since gum truncates long cells rather than wrapping.
 
 ## Concepts
 

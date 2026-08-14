@@ -69,7 +69,8 @@ case "$state" in
   specified) : ;;   # zero open questions → auto-advance (owner may still inspect the spec below)
   *)
     tl_stop "spec '$id' is '$state' with $("$BIN/tl-spec.sh" open-count "$id") open question(s); not dispatching."
-    "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '$2=="open"{printf "  open [%s] %s\n",$1,$5}'
+    "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v OFS='\t' '$2=="open"{print $1,$5}' \
+      | tl_table "QID,OPEN QUESTION"
     tl_kv answer "tl-grill answer $id        (walks the open ones in the terminal)"
     tl_kv or     "tl-grill reject $id <reason>"
     tl_kv then   "tl-run $slug"

@@ -23,7 +23,8 @@ _finalize() {  # id — set state from open-count, then report  (bump_hits lives
   # An empty bank yields 0 questions; tl-run then refuses to dispatch (fail closed, #49). Say so here
   # so a bare `tl-grill` run doesn't look like a clean pass when nothing was actually asked.
   [ "$total" -eq 0 ] && echo "tl: ⚠ no questions produced — $TL_LEAD/questions.md is empty (#49); the grill had nothing to ask." || true
-  "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '{printf "  [%s] %-8s %-8s %s\n",$1,$2,$3,$5}'
+  "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v OFS='\t' '{print $1,$2,$3,$5}' \
+    | tl_table "QID,STATE,SOURCE,QUESTION"
   if [ "$open" -gt 0 ]; then
     echo "tl: answer the delta:"
     tl_kv walk "tl-grill answer $id        (one question at a time, in this terminal)"

@@ -68,6 +68,35 @@ tl_ok()   { printf '%s%s: %s%s\n' "$TL_C_OK" "$TL_PROG" "$*" "$TL_C_0"; }       
 tl_kv()   { printf '  %s%-7s%s %s\n' "$TL_C_KEY" "$1:" "$TL_C_0" "$2"; }   # cause:/fix:/next: lines
 tl_note() { printf '  %s%s%s\n' "$TL_C_DIM" "$*" "$TL_C_0"; }              # paths, provenance
 
+# tl_table "Col1,Col2,…"  <- TAB-separated rows on stdin. The single owner of tabular DISPLAY;
+# the machine-readable forms (tl-spec qlist's pipe encoding, findings.json) are untouched, so
+# nothing that parses this data goes through here.
+#   gum installed -> `gum table --print` (bordered)
+#   otherwise     -> an awk that measures each column. NOT `column -t`: BSD column silently drops
+#                    empty fields, so one null path shifts every later cell into the wrong column.
+# Buffered to a temp file first so a gum failure falls back to awk instead of eating the rows.
+# TL_NO_TABLE=1 forces the plain form — gum table truncates rather than wraps, so a long question
+# in a narrow terminal is better read unboxed.
+tl_table() {
+  local cols="$1" t; t="$(mktemp)"; cat > "$t"
+  [ -s "$t" ] || { rm -f "$t"; return 0; }
+  if [ -z "${TL_NO_TABLE:-}" ] && command -v gum >/dev/null 2>&1 &&
+     gum table --print --lazy-quotes --separator="$(printf '\t')" --columns="$cols" < "$t" 2>/dev/null
+  then rm -f "$t"; return 0; fi
+  awk -F'\t' -v hdr="$cols" -v k="$TL_C_KEY" -v z="$TL_C_0" '
+    BEGIN{ n=split(hdr,H,",") }
+    { for(i=1;i<=NF;i++){ C[NR,i]=$i; if(length($i)>w[i]) w[i]=length($i) }
+      if(NF>n) n=NF; R=NR }
+    END{
+      for(i=1;i<=n;i++) if(length(H[i])>w[i]) w[i]=length(H[i])
+      s=""; for(i=1;i<=n;i++) s=s sprintf("%-*s  ", w[i], H[i]); sub(/ +$/,"",s)
+      print "  " k s z
+      for(r=1;r<=R;r++){ s=""
+        for(i=1;i<=n;i++) s=s sprintf("%-*s  ", w[i], C[r,i]); sub(/ +$/,"",s); print "  " s }
+    }' "$t"
+  rm -f "$t"
+}
+
 # bump_hits <lead-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry
 # (1-indexed in file order — the same numbering the grill/review adapter shows the model). The reuse
 # counter is the risk-1 / D13 signal (§2.6, SHAPE.md): a question fires on a grill, a rubric rule fires

@@ -18,6 +18,10 @@ use (§4).
 - **`tl_text` / `tl_pick_many` prompt helpers** in `tl-wizard.sh`, on the same optional-enhancement
   seam as `tl_choose`: [`gum`](https://github.com/charmbracelet/gum) → `fzf` → numbered menu. Neither
   is required. Gate finding resolution now uses the shared picker too.
+- **`tl_table`** — question lists (`tl-grill`, `tl-run`'s open-question stop) and gate findings render
+  as a `gum table` when gum is installed, and as a width-measuring aligned table otherwise. The
+  machine-readable forms (`tl-spec qlist`'s pipe encoding, `findings.json`) are untouched — only the
+  display changed. `TL_NO_TABLE=1` forces the plain form; gum truncates long cells rather than wrapping.
 - **Colourised output** — `tl_stop`/`tl_ok`/`tl_kv`/`tl_note` in `tl-common.sh` give refusals,
   successes, and next-step lines distinct weight. Only when stdout is a terminal; `NO_COLOR` honoured,
   so piped and captured output is byte-identical to before.

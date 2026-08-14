@@ -86,6 +86,16 @@ n="$(grep -c '^### ' "$TL_LEAD/questions.md")"
 
 PATH="$REAL_PATH"
 
+echo "== tl_table: the plain form aligns, and an empty cell does not shift the row =="
+# `column -t` was the obvious fallback and is wrong: BSD column drops empty fields, so one null
+# path silently moves every later cell one column left. The awk measures instead.
+rows="$(printf 'f1\task-user\ttest-regression\t\nf2\task-user\tscope-cap\tsrc/auth.ts\n')"
+out="$(printf '%s\n' "$rows" | TL_NO_TABLE=1 tl_table "ID,CLASS,RULE,PATH")"
+printf '%s\n' "$out" | grep -q '^  ID  CLASS     RULE             PATH$' || fail "header not aligned: $out"
+printf '%s\n' "$out" | grep -q '^  f2  ask-user  scope-cap        src/auth.ts$' \
+  || fail "empty cell in the previous row shifted this one: $out"
+[ -z "$(printf '' | tl_table "A,B")" ] || fail "empty input should render nothing, not a bare header"
+
 echo "== when gum is installed: the right subcommand, and a cancel that propagates =="
 # Two defects this pins down, both found by hand at a real terminal:
 #  1. `gum write` is the multi-line textarea — it submits on ctrl-d, so pressing enter looks hung.
@@ -93,11 +103,14 @@ echo "== when gum is installed: the right subcommand, and a cancel that propagat
 #  2. A cancelled picker used to fall through to the plain prompt (two prompts for one answer) or
 #     return "" (which the gate reads as "approve"). Cancel must propagate.
 mkdir -p "$WORK/fakebin"
-printf '#!/bin/sh\nprintf "%%s\\n" "$*" >&2\necho picked\n' > "$WORK/fakebin/gum"
+# Records its argv to a file, not stderr: tl_table silences gum's stderr so a broken table falls
+# back cleanly, which would also hide the assertion.
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "$GUM_ARGS"\necho picked\n' > "$WORK/fakebin/gum"
 chmod +x "$WORK/fakebin/gum"
-args="$(PATH="$WORK/fakebin:$PATH" tl_text K "the question" "the default" 2>&1 >/dev/null)"
+export GUM_ARGS="$WORK/gum.args"
 [ "$(PATH="$WORK/fakebin:$PATH" tl_text K "the question" "the default" 2>/dev/null)" = picked ] \
   || fail "tl_text ignored gum"
+args="$(cat "$GUM_ARGS")"
 case "$args" in
   input*) ;;
   write*) fail "tl_text uses 'gum write' — it submits on ctrl-d and reads as a hung prompt" ;;
@@ -106,7 +119,18 @@ esac
 case "$args" in *--value=*) ;; *) fail "tl_text dropped --value (no editable default): $args";; esac
 case "$args" in *--header=*) ;; *) fail "tl_text dropped --header (question invisible): $args";; esac
 
+printf 'a\tb\n' | PATH="$WORK/fakebin:$PATH" tl_table "C1,C2" >/dev/null
+args="$(cat "$GUM_ARGS")"
+case "$args" in
+  table*--print*) ;;
+  *) fail "tl_table did not shell out to 'gum table --print': $args" ;;
+esac
+case "$args" in *--columns=C1,C2*) ;; *) fail "tl_table dropped --columns: $args";; esac
+
 printf '#!/bin/sh\nexit 130\n' > "$WORK/fakebin/gum"      # now stand in for esc / ctrl-c
+# A gum that fails must not eat the rows — the table falls back rather than printing nothing.
+out="$(printf 'a\tb\n' | PATH="$WORK/fakebin:$PATH" tl_table "C1,C2")"
+printf '%s\n' "$out" | grep -q 'a  *b' || fail "gum failure swallowed the table rows: $out"
 out="$(PATH="$WORK/fakebin:$PATH" tl_text K "the question" "the default" 2>/dev/null)" && \
   fail "cancelled tl_text returned success"
 [ -z "$out" ] || fail "cancelled tl_text emitted '$out' instead of propagating the cancel"

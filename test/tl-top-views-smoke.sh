@@ -34,7 +34,15 @@ state: drafted
 grilled_at: 2026-08-14
 outcome:
 q: q1|decided|inferred|2026-08-14|use the existing pg index, no new service
-q: q3|open|inferred|2026-08-14|what happens to the old index?
+q: q4|decided|inferred|2026-08-14|Answer 4 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q5|decided|inferred|2026-08-14|Answer 5 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q6|decided|inferred|2026-08-14|Answer 6 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q7|decided|inferred|2026-08-14|Answer 7 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q8|decided|inferred|2026-08-14|Answer 8 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q9|decided|inferred|2026-08-14|Answer 9 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q10|decided|inferred|2026-08-14|Answer 10 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q11|decided|inferred|2026-08-14|Answer 11 - this one runs long on purpose: it has to wrap to three lines at a hundred and twenty columns so that nine of them together cannot fit on a forty-row screen, which is exactly the case the briefing has to budget for rather than silently drop the backlog.
+q: q3|open|inferred|2026-08-14|What happens to the old index while the new one builds, and who owns the rollback if the migration has to be abandoned halfway through a busy weekday afternoon with three other services already depending on it?
 ---
 # Add full-text search
 EOF
@@ -97,17 +105,27 @@ want(screen, "tl-add-search", "launch")
 want(screen, "q3", "launch")
 want(screen, "never grilled", "launch: un-grilled backlog item must show")
 want(screen, "csv-export", "launch")
-want(screen, "decided here already: q1", "launch: the detail pane shows what is already settled")
+want(screen, "already decided here", "launch: the detail pane counts what is settled")
+# the reported bug: a long question was truncated at the window edge in all three views.
+# The table row still truncates (that is what makes it a table) — the detail pane must not.
+want(screen, "services already depending on it?", "launch: long question must WRAP in the pane")
 if screen.count("● question") != 1:
     bad.append("launch: exactly one question row expected (q1 is answered, so it must not be a "
                "row) — got %d" % screen.count("● question"))
 
-want(send("2"), "open question", "view 2 briefing")
+screen = send("2")
+want(screen, "open question", "view 2 briefing")
+# 9 answered questions, each wrapping to 2-3 lines, must not crowd out the backlog context
+want(screen, "more — 3 modal", "view 2 must cap the prior answers and say how many it held back")
+want(screen, "backlog said", "view 2 must keep room for what the backlog asked for")
+want(screen, "services already depending on it?", "view 2 must wrap the question")
 screen = send("3")
 want(screen, "techlead >", "view 3 modal")
 screen = send(":q add-search\n", 1.5)
 want(screen, "q1", "view 3 :q lists answered questions too")
 want(screen, "inferred", "view 3 :q")
+screen = send("j" * 14)                    # q3 (the long one) is the last row here
+want(screen, "services already depending on it?", "view 3 detail pane must wrap the question")
 want(send("?"), "renders, never mutates", "help overlay")
 send(" ")                                  # dismiss help
 
@@ -116,6 +134,7 @@ want(screen, "WHAT", "back to view 1 repaints the inbox table")
 want(screen, "never grilled", "back to view 1")
 screen = send("d", 1.5)                    # answer the open question
 want(screen, "answer q3", "answer prompt opens")
+want(screen, "what happens to the old index", "the prompt label carries the question")
 want(screen, "enter commit", "answer prompt shows its keys")
 screen = send("use the existing index; drop the old one behind a flag\n", 3.0)
 

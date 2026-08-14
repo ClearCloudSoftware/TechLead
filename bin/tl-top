@@ -163,6 +163,7 @@ class Target:
     qid: str            # "" for item/task-level actions
     seed: str           # what the answer prompt starts with — see seed_for()
     slug: str
+    text: str = ""      # the row in full, for the detail pane: table rows truncate, this doesn't
 
 
 def seed_for(question):
@@ -695,8 +696,15 @@ def _addln(win, y, x, s, attr=0):
 
 
 def _bar(win, y, left, right="", attr=None):
-    """A full-width reverse-video bar — tl-top's header/footer idiom."""
-    h, w = win.getmaxyx()
+    """A full-width reverse-video bar — tl-top's header/footer idiom.
+
+    The RIGHT side wins when they don't both fit: it carries the key hints, and a long left side
+    (a notice, or a prompt label quoting a whole question) would otherwise push them off screen
+    exactly when you need to know how to get out."""
+    _h, w = win.getmaxyx()
+    room = w - len(right) - 2
+    if len(left) > room:
+        left = left[: max(0, room - 1)] + "…"
     pad = max(1, w - len(left) - len(right) - 1)
     _addln(win, y, 0, (left + " " * pad + right).ljust(w),
            (curses.A_REVERSE | curses.A_BOLD) if attr is None else attr)
@@ -752,40 +760,47 @@ def _foot_inbox(win, st, q):
 
 
 def _draw_detail(win, r, y, ymax, data_dir):
-    """The pane under the inbox: what this row actually is, in the row's own terms."""
+    """The pane under the inbox: what this row actually is, in the row's own terms.
+
+    Table rows are one line each and truncate — that is what makes a table scannable. This pane
+    is the other half of that bargain: it is where the full text has to be readable, so
+    everything here wraps."""
     if y >= ymax:
         return y
     if r.what == "question":
         qq = r.question
-        _addln(win, y, 0, "── %s · %s " % (r.qid, qq.text if qq else "") + "─" * 60,
-               _bucket_attr("quiet")); y += 1
-        if qq:
-            _addln(win, y, 0, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at)); y += 1
+        y = _rule(win, y, r.qid)
+        y = _para(win, y, ymax, 0, qq.text if qq else r.detail, curses.A_BOLD)
+        if qq and y < ymax:
+            _addln(win, y, 0, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at),
+                   _bucket_attr("quiet")); y += 1
         done = [x for x in (r.spec.questions if r.spec else []) if x.state != "open"]
         if done and y < ymax:
-            _addln(win, y, 0, "decided here already: "
-                   + " · ".join("%s %s" % (x.qid, x.text) for x in done[:3])); y += 1
+            _addln(win, y, 0, "%d already decided here — 2 briefing shows them in full"
+                   % len(done), _bucket_attr("quiet")); y += 1
     elif r.what == "gate":
-        _addln(win, y, 0, "── findings ─" + "─" * 60, _bucket_attr("quiet")); y += 1
+        y = _rule(win, y, "findings")
         for f in (r.fleet.findings if r.fleet else []):
             if y >= ymax:
                 break
             open_ = f.get("resolved") in (None, "fix")
-            _addln(win, y, 2, "%s [%s] %s: %s" % ("!" if open_ else "x", f.get("class", "?"),
-                                                  f.get("rule", "?"), f.get("detail", "")),
-                   curses.A_BOLD if open_ else curses.A_DIM)
-            y += 1
+            y = _para(win, y, ymax, 2, f.get("detail", ""),
+                      curses.A_BOLD if open_ else curses.A_DIM,
+                      label="%s [%s] %s " % ("!" if open_ else "x", f.get("class", "?"),
+                                             f.get("rule", "?")))
     elif r.what == "backlog":
-        _addln(win, y, 0, "── %s ─" % r.title + "─" * 60, _bucket_attr("quiet")); y += 1
+        y = _rule(win, y, r.title)
         _, _, body = _backlog_cached(r.slug)
-        for ln in body.splitlines()[: max(0, ymax - y)]:
-            _addln(win, y, 2, ln); y += 1
+        for para in body.split("\n"):
+            if y >= ymax:
+                break
+            y = _para(win, y, ymax, 2, para) if para.strip() else y + 1
     else:
-        _addln(win, y, 0, "── %s ─" % r.task + "─" * 60, _bucket_attr("quiet")); y += 1
+        y = _rule(win, y, r.task)
         remaining = ymax - y
         if remaining > 0 and r.fleet:
             for ln in tl_peek(r.task, remaining).splitlines()[-remaining:]:
-                _addln(win, y, 2, ln); y += 1
+                _addln(win, y, 2, ln); y += 1     # worker output is preformatted — never rewrap it
     return y
 
 
@@ -808,44 +823,51 @@ def _draw_briefing(win, st, q, data_dir):
     _addln(win, y, 2, "%-24s %s" % (label, r.task or r.slug),
            _bucket_attr(_WHAT_ATTR.get(r.what, "quiet"))); y += 2
 
+    # This view exists to be READ, so nothing in it truncates — everything goes through _para.
+    # ymax is the rule above the footer; _para marks the cut with '…' if a block outruns it.
+    ymax = h - 2
     qq = r.question
-    if qq:
-        for ln in _wrap(qq.text, w - 6):
-            _addln(win, y, 2, ln, curses.A_BOLD); y += 1
-        y += 1
+    y = _para(win, y, ymax, 2, qq.text if qq else r.detail, curses.A_BOLD) + 1
+    if qq and y < ymax:
         _addln(win, y, 2, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at),
                _bucket_attr("quiet")); y += 2
-    else:
-        for ln in _wrap(r.detail, w - 6):
-            _addln(win, y, 2, ln, curses.A_BOLD); y += 1
-        y += 1
 
     if r.what == "gate" and r.fleet:
         for f in r.fleet.findings:
-            if y >= h - 4:
+            if y >= ymax:
                 break
             open_ = f.get("resolved") in (None, "fix")
-            _addln(win, y, 5, "%s [%s] %s" % ("!" if open_ else "x", f.get("rule", "?"),
-                                              f.get("detail", "")),
-                   curses.A_BOLD if open_ else curses.A_DIM)
-            y += 1
+            y = _para(win, y, ymax, 5, f.get("detail", ""),
+                      curses.A_BOLD if open_ else curses.A_DIM,
+                      label="%s [%s] " % ("!" if open_ else "x", f.get("rule", "?")))
         y += 1
 
     done = [x for x in (r.spec.questions if r.spec else []) if x.state != "open"]
-    if done and y < h - 5:
+    if done and y < ymax - 1:
         _addln(win, y, 2, "Already decided on this item:", _bucket_attr("quiet")); y += 1
+        # A well-grilled item can carry a dozen answers, each two or three lines once wrapped —
+        # enough to fill the screen and push the backlog context off it. Prior answers are context
+        # for the decision, not the decision, so they yield: cap them and say how many were held
+        # back, keeping the last few lines for what the backlog actually asked for.
+        stop = max(y, ymax - 4)
+        shown = 0
         for x in done:
-            if y >= h - 4:
+            # all-or-nothing: half an answer ending in '…' reads like the list ended, so an entry
+            # that doesn't fit entirely is held back and counted instead
+            if y + len(_wrap(x.text, max(8, w - 11))) > stop:
                 break
-            _addln(win, y, 5, "%-4s %s" % (x.qid, x.text)); y += 1
+            y = _para(win, y, stop, 5, x.text, label="%-5s" % x.qid)
+            shown += 1
+        if shown < len(done) and y < ymax:
+            _addln(win, y, 5, "+%d more — 3 modal, :q %s shows them all"
+                   % (len(done) - shown, r.slug or ""), _bucket_attr("quiet")); y += 1
         y += 1
 
-    if r.slug and y < h - 4:
+    if r.slug and y < ymax - 1:
         _, title, body = _backlog_cached(r.slug)
         if title or body:
             _addln(win, y, 2, "Backlog said:", _bucket_attr("quiet")); y += 1
-            for ln in _wrap(title + (" — " + body if body else ""), w - 8)[: max(0, h - 4 - y)]:
-                _addln(win, y, 5, ln); y += 1
+            y = _para(win, y, ymax, 5, title + (" — " + body if body else ""))
 
     _addln(win, h - 2, 0, "─" * (w - 1), _bucket_attr("quiet"))
     if st["notice"]:
@@ -869,7 +891,7 @@ def modal_table(view, arg, q, data_dir, lead_dir):
     if view == "backlog":
         rows = [("%-16s %-11s %-5s %s" % (slug[:16], stage[:11],
                                           ("%d/%d" % (o, t)) if t else "-", title[:36]),
-                 Target(tid or slug, "", "", slug))
+                 Target(tid or slug, "", "", slug, title))
                 for slug, title, tid, stage, o, t in q.items]
         return "techlead > backlog", "%-16s %-11s %-5s %s" % ("SLUG", "STAGE", "OPEN", "TITLE"), rows
     if view == "q":
@@ -878,7 +900,7 @@ def modal_table(view, arg, q, data_dir, lead_dir):
         if spec is None:
             return "techlead > q > %s" % arg, "", [("no spec for '%s' — grill it first" % arg, None)]
         rows = [("%-5s %-9s %-10s %s" % (x.qid, x.state, x.source, x.text),
-                 Target(tid, x.qid, seed_for(x), arg))
+                 Target(tid, x.qid, seed_for(x), arg, x.text))
                 for x in spec.questions]
         return ("techlead > q > %s" % arg, "%-5s %-9s %-10s %s" % ("QID", "STATE", "SOURCE", "ASKED"),
                 rows)
@@ -888,7 +910,7 @@ def modal_table(view, arg, q, data_dir, lead_dir):
         rows = [("%-2s %-10s %-18s %s" % ("!" if f.get("resolved") in (None, "fix") else "x",
                                           f.get("class", "?"), f.get("rule", "?"),
                                           f.get("detail", "")),
-                 Target(tid, "", "", "")) for f in fs]
+                 Target(tid, "", "", "", f.get("detail", ""))) for f in fs]
         return ("techlead > findings > %s" % tid,
                 "%-2s %-10s %-18s %s" % ("", "CLASS", "RULE", "DETAIL"),
                 rows or [("no findings for '%s'" % tid, None)])
@@ -902,13 +924,13 @@ def modal_table(view, arg, q, data_dir, lead_dir):
     for r in sorted(q.quiet, key=lambda r: r.id):
         rows.append(("%-17s %-7s %-14s %-12s %s" % (r.id[:17], r.kind[:7], r.state[:14],
                                                     r.project[:12], r.waiting_on),
-                     Target(r.id, "", "", "")))
+                     Target(r.id, "", "", "", "%s · %s · %s" % (r.kind, r.state, r.project))))
     for r in q.rows:
         if r.fleet:
             f = r.fleet
             rows.insert(0, ("%-17s %-7s %-14s %-12s %s" % (f.id[:17], f.kind[:7], f.state[:14],
                                                            f.project[:12], f.waiting_on),
-                            Target(f.id, "", "", r.slug)))
+                            Target(f.id, "", "", r.slug, r.detail)))
     return ("techlead > fleet",
             "%-17s %-7s %-14s %-12s %s" % ("TASK", "KIND", "STATE", "PROJECT", "WAITING ON"),
             rows or [("no active tasks — the fleet is idle.", None)])
@@ -923,7 +945,11 @@ def _draw_modal(win, st, q, data_dir):
         _addln(win, 2, 0, " " + header, curses.A_UNDERLINE)
     st["msel"] = max(0, min(st["msel"], len(rows) - 1)) if rows else 0
 
-    body_h = max(3, h - 9)
+    # Reserve the bottom for the selected row IN FULL. The table above truncates each row to one
+    # line — that is what makes it scannable — so this pane is the only place a long question is
+    # actually readable here, and it is why the command hints get one line instead of two.
+    detail_h = 5
+    body_h = max(3, h - 6 - detail_h)
     top = max(0, st["msel"] - body_h + 1) if st["msel"] >= body_h else 0
     y = 3
     for i in range(top, min(len(rows), top + body_h)):
@@ -932,11 +958,13 @@ def _draw_modal(win, st, q, data_dir):
         _addln(win, y, 0, (" " + rows[i][0]).ljust(w), attr)
         y += 1
 
-    y = min(y + 1, h - 5)
-    _addln(win, y, 0, "─" * (w - 1), _bucket_attr("quiet")); y += 1
-    _addln(win, y, 1, ":backlog   :q <slug>   :fleet   :findings <id>   :bank",
-           _bucket_attr("quiet")); y += 1
-    _addln(win, y, 1, "/text filters this table · enter opens the selected row in 2 briefing",
+    y = h - detail_h - 2
+    sel_t = rows[st["msel"]][1] if rows and 0 <= st["msel"] < len(rows) else None
+    y = _rule(win, y, ("%s · %s" % (sel_t.task, sel_t.qid)) if sel_t and sel_t.qid
+              else (sel_t.task if sel_t else ""))
+    if sel_t and sel_t.text:
+        y = _para(win, y, h - 2, 1, sel_t.text)
+    _addln(win, h - 2, 1, ":backlog  :q <slug>  :fleet  :findings <id>  :bank  ·  / filters",
            _bucket_attr("quiet"))
     if st["notice"]:
         _bar(win, h - 1, " " + st["notice"], " (any key) ")
@@ -957,6 +985,35 @@ def _wrap(s, width):
     if line:
         out.append(line)
     return out or [""]
+
+
+def _para(win, y, ymax, x, text, attr=0, label=""):
+    """Draw owner prose wrapped to the window, hanging-indented under `label`. Returns the new y.
+
+    Questions, answers, findings and backlog bodies are written by a person and are routinely
+    longer than a line — truncating them at the window edge is the one thing that makes a detail
+    pane useless. If it still doesn't fit the space available, the last line drawn ends in '…' so
+    the cut is visible rather than silent."""
+    _h, w = win.getmaxyx()
+    ind = x + len(label)
+    lines = _wrap(text, max(8, w - ind - 1))
+    for i, ln in enumerate(lines):
+        if y >= ymax:
+            break
+        if i == 0 and label:
+            _addln(win, y, x, label, _bucket_attr("quiet"))
+        clipped = i < len(lines) - 1 and y + 1 >= ymax
+        _addln(win, y, ind, (ln + " …") if clipped else ln, attr)
+        y += 1
+    return y
+
+
+def _rule(win, y, title=""):
+    """A labelled section rule, always full width whatever the terminal is."""
+    _h, w = win.getmaxyx()
+    head = ("── %s " % title) if title else "──"
+    _addln(win, y, 0, head + "─" * max(0, w - len(head) - 1), _bucket_attr("quiet"))
+    return y + 1
 
 
 def _filtered(rows, needle):

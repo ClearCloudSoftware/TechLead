@@ -211,10 +211,21 @@ def _guard():
         sys.exit("tl-top: refusing — TL_HOME (%s) is not a TechLead instance (no AGENTS.md)" % home)
 
 
+def _tl_root():
+    """Nearest ancestor .techlead/ (per-project state, mirrors tl-common's walk-up); else TL_HOME.
+    An explicit TL_STATE/TL_DATA still wins in _state_paths()."""
+    d = os.getcwd()
+    while d != "/":
+        if os.path.isdir(os.path.join(d, ".techlead")):
+            return os.path.join(d, ".techlead")
+        d = os.path.dirname(d)
+    return _tl_home()
+
+
 def _state_paths():
-    home = _tl_home()
-    return (os.environ.get("TL_STATE") or os.path.join(home, "state"),
-            os.environ.get("TL_DATA") or os.path.join(home, "data"))
+    root = _tl_root()
+    return (os.environ.get("TL_STATE") or os.path.join(root, "state"),
+            os.environ.get("TL_DATA") or os.path.join(root, "data"))
 
 
 def _run_capture(argv):

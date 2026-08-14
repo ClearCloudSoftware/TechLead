@@ -10,7 +10,7 @@
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
 rule="${1:?usage: tl-classify <rule-id>}"
-rubric="${TL_REVIEW_RUBRIC:-$TL_HOME/lead/review-rubric.md}"   # overridable for tests, single owner
+rubric="${TL_REVIEW_RUBRIC:-$TL_LEAD/review-rubric.md}"   # overridable for tests, single owner
 TAB="$(printf '\t')"
 
 # An ACTIVE entry is a `### <exact-rule-id>` heading followed by a `class:` line. Commented-out

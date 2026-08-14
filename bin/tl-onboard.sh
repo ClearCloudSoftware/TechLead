@@ -21,6 +21,13 @@ esac; done
 path="$(cd "$raw" && git rev-parse --show-toplevel 2>/dev/null)" \
   || tl_die "not a git repo: $raw  (run 'git init' there, or use tl-new for a brand-new project)"
 path="$(cd "$path" && pwd -P)"
+
+# Per-project state (owner decision 2026-08-14): register into this repo's own .techlead/, not
+# TL_HOME. Scaffold it and export the paths so every sub-process below (tl-project, tl-baseline,
+# tl-spawn) targets this project regardless of the current working directory.
+tl_scaffold_project "$path"
+export TL_DATA="$path/.techlead/data" TL_STATE="$path/.techlead/state" TL_LEAD="$path/.techlead/lead"
+
 det() { "$BIN/tl-detect.sh" "$1" "$path"; }
 
 name="$(tl_ask NAME "project name (registry key)" "$(basename "$path")")"
@@ -79,4 +86,4 @@ else
   printf 'tl:   tl-spawn --id %s --project %s --project-name %s --kind plan --brief <brief>\n' "$sid" "$path" "$name" >&2
 fi
 
-printf 'tl: next → add a backlog item to data/backlog.md, then grill it:  tl-grill <slug>\n' >&2
+printf 'tl: next → cd %s, add a backlog item to .techlead/data/backlog.md, then grill it: tl-grill <slug>\n' "$path" >&2

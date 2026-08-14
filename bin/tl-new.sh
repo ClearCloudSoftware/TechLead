@@ -38,6 +38,13 @@ fi
 git -C "$target" commit --allow-empty -q -m "chore: initialize repository"
 abs="$(cd "$target" && pwd -P)"   # canonicalize symlinks (macOS /var -> /private/var)
 
+# Per-project state (owner decision 2026-08-14): this repo's data/state/lead live in its own
+# .techlead/, not TL_HOME. Scaffold it and point the registry writes below at it by exporting the
+# paths (tl-common honours an already-set TL_DATA/TL_STATE/TL_LEAD, so the sub-processes target the
+# project we are creating regardless of the current working directory).
+tl_scaffold_project "$abs"
+export TL_DATA="$abs/.techlead/data" TL_STATE="$abs/.techlead/state" TL_LEAD="$abs/.techlead/lead"
+
 pj() { "$BIN/tl-project.sh" set "$name" "$@"; }
 pj path "$abs"
 pj mode local-only            # no remote yet → fast-forward locally
@@ -46,5 +53,6 @@ pj max_files_changed 25
 pj readiness survey           # §2.7: no baseline yet → plan-only until a test harness exists
 
 tl_log "created + registered '$name' (readiness=survey, plan-only) — $abs"
-printf 'tl: next → add a backlog item, then grill a first plan task to set up structure + a test\n' >&2
+printf 'tl: next → cd %s, add a backlog item to .techlead/data/backlog.md, then grill a first plan\n' "$name" >&2
+printf 'tl:        task to set up structure + a test\n' >&2
 printf 'tl:        harness. Once tests exist, tl-baseline promotes it to ready for change tasks.\n' >&2

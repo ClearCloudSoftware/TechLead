@@ -69,7 +69,7 @@ tl_log "grill: $id — inference pass over lead/questions.md"
 : "${TL_GRILL_CMD:?tl: no grill driver — set TL_GRILL_CMD (e.g. adapters/claude-grill.sh)}"
 # driver emits one line per question:  qid <TAB> answer_state <TAB> source <TAB> text
 TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
-TL_QUESTIONS="$TL_HOME/lead/questions.md" TL_DECISIONS="$TL_HOME/lead/decisions" \
+TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" \
   $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text; do
     [ -n "$qid" ] || continue
     case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)

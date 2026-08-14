@@ -44,8 +44,21 @@ case "$cmd" in
     [ -f "$BACKLOG" ] || tl_die "no backlog at $BACKLOG (add one: tl-backlog add <slug> \"<title>\")"
     awk '/^## /{sub(/^## /,""); print "  "$0}' "$BACKLOG"
     ;;
+  show)
+    # show <slug> — the READ side of one item: "<line>\t<title>" then the body verbatim. Same heading
+    # rule `add` writes and tl-grill matches, in one place, so a reader (tl-top) doesn't grow a second
+    # copy of the awk (§3.1 single owner). The line number is what `$EDITOR +<line>` needs.
+    slug="${2:?usage: tl-backlog show <slug>}"
+    [ -f "$BACKLOG" ] || tl_die "no backlog at $BACKLOG (add one: tl-backlog add <slug> \"<title>\")"
+    out="$(awk -v s="$slug" '
+      index($0,"## "s":")==1 { t=$0; sub("^## [^:]*: *","",t); printf "%d\t%s\n", NR, t; f=1; next }
+      f && index($0,"## ")==1 { exit }
+      f { print }' "$BACKLOG")"
+    [ -n "$out" ] || tl_die "backlog item '$slug' not found in $BACKLOG"
+    printf '%s\n' "$out"
+    ;;
   -h|--help)
-    echo 'usage: tl-backlog add <slug> "<title>" [description...]   |   tl-backlog list'; exit 0 ;;
+    echo 'usage: tl-backlog add <slug> "<title>" [description...]   |   tl-backlog list   |   tl-backlog show <slug>'; exit 0 ;;
   *)
-    tl_die 'usage: tl-backlog add <slug> "<title>" [description...] | list' ;;
+    tl_die 'usage: tl-backlog add <slug> "<title>" [description...] | list | show <slug>' ;;
 esac

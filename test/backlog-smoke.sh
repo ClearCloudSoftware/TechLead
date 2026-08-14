@@ -57,4 +57,22 @@ grep -qx '## existing: an item with no H1 header' "$HL" || fail "B7: clobbered t
 grep -qx '## fresh: A fresh item' "$HL" || fail "B7: did not append the new item"
 echo "  B7 ok — header restored, existing + new items intact"
 
-echo "PASS: tl-backlog add appends grill-matchable items with a slug guard + no duplicates; list works"
+echo "== B8: show returns line + title, then the body (the read side tl-top uses) =="
+out="$("$BIN/tl-backlog.sh" show add-search)" || fail "B8: show errored"
+hdr="$(printf '%s' "$out" | head -1)"
+line="$(printf '%s' "$hdr" | cut -f1)"; title="$(printf '%s' "$hdr" | cut -f2)"
+[ "$title" = "Add full-text search" ] || fail "B8: wrong title from show (got '$title')"
+case "$line" in ''|*[!0-9]*) fail "B8: first field is not a line number (got '$line')";; esac
+sed -n "${line}p" "$TL_BACKLOG" | grep -q '^## add-search:' || fail "B8: line number does not point at the heading"
+printf '%s' "$out" | tail -n +2 | grep -q 'Filter notes by title' || fail "B8: body not returned"
+printf '%s' "$out" | grep -q 'fix-crash' && fail "B8: bled into the next item" || true
+echo "  B8 ok — line, title and body, stopping at the next item"
+
+echo "== B9: show refuses an unknown slug, and a body-less item still works =="
+if "$BIN/tl-backlog.sh" show nope-not-here >/tmp/bl-b9.log 2>&1; then fail "B9: show accepted an unknown slug"; fi
+grep -q 'not found' /tmp/bl-b9.log || fail "B9: wrong error for an unknown slug: $(cat /tmp/bl-b9.log)"
+out="$("$BIN/tl-backlog.sh" show fix-crash)" || fail "B9: show errored on a body-less item"
+[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 1 ] || fail "B9: body-less item should be one line"
+echo "  B9 ok — unknown slug refused; body-less item is just the header line"
+
+echo "PASS: tl-backlog add appends grill-matchable items with a slug guard + no duplicates; list + show work"

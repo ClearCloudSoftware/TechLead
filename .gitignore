@@ -7,3 +7,6 @@
 # python bytecode (tl-top) — build junk
 __pycache__/
 *.pyc
+
+# git worktrees for per-feature work (CLAUDE.md workflow) — never source
+.worktrees/

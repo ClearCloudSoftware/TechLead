@@ -12,6 +12,24 @@ TAB="$(printf '\t')"
 
 slugify() { printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//'; }
 
+# bump_hits <questions-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry
+# (1-indexed in file order — the same numbering the grill adapter shows the model). Out-of-range
+# ordinals simply don't match, so a garbled ref is a silent no-op. Single owner of the hits: write.
+bump_hits() {
+  local qfile="$1"; shift
+  [ -f "$qfile" ] || return 0
+  local ords date tmp
+  ords=" $* "; date="$(date -u +%Y-%m-%d)"; tmp="$(mktemp)"
+  awk -v ords="$ords" -v date="$date" '
+    /^### /{ sec++ }
+    /^hits:/ && index(ords, " " sec " ") > 0 {
+      sub(/hits:[[:space:]]*[0-9]+/, "hits: " ($2 + 1))
+      sub(/last:[[:space:]]*[^[:space:]].*/, "last: " date)
+    }
+    { print }
+  ' "$qfile" > "$tmp" && mv "$tmp" "$qfile"
+}
+
 _finalize() {  # id — set state from open-count, then report
   local id="$1" open total
   open="$("$BIN/tl-spec.sh" open-count "$id")"
@@ -112,15 +130,24 @@ id="tl-$(slugify "$slug")"
 tl_log "grill: $id — inference pass over lead/questions.md"
 
 : "${TL_GRILL_CMD:?tl: no grill driver — set TL_GRILL_CMD (e.g. adapters/claude-grill.sh)}"
-# driver emits one line per question:  qid <TAB> answer_state <TAB> source <TAB> text
+# driver emits one line per question:  qid <TAB> answer_state <TAB> source <TAB> text [<TAB> bank#]
+# The optional 5th field is the number of the lead/questions.md entry this answer was inferred from
+# (§2.6 hits: signal). Old 4-field drivers just omit it → no bump. The loop runs in a pipe subshell,
+# so bank refs are stashed in a temp file to survive to the bump step below.
+brefs="$(mktemp)"
 TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
 TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" \
-  $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text; do
+  $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text bank; do
     [ -n "$qid" ] || continue
     case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)
     case "$src" in owner|inferred) ;; *) src=inferred;; esac
     "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" "$src" "$(date -u +%Y-%m-%d)" "$text"
+    case "$bank" in ''|*[!0-9]*) ;; *) printf '%s\n' "$bank" >> "$brefs";; esac   # numeric bank ref only
   done
 rm -f "$bodyf"
+# hits: bump — a bank question that justified an inferred answer this grill has fired (§2.6, SHAPE.md).
+# Reuse-rate is the risk-1 / D13 signal, so bump each referenced entry once and stamp its date.
+if [ -s "$brefs" ]; then bump_hits "$TL_LEAD/questions.md" $(sort -un "$brefs"); fi
+rm -f "$brefs"
 "$BIN/tl-metric.sh" record "$id" grill "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
 _finalize "$id"

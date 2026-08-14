@@ -28,7 +28,8 @@ use (§4).
     never executes a draw function, so a typo in a view used to surface only on the keypress.
   - Owner prose **wraps to the window** everywhere it is meant to be read — questions, answers,
     findings, backlog bodies. In the inbox that includes the list itself: the DETAIL column wraps
-    under its own column and a row is as tall as its text needs, so a question is readable where
+    under its own column, a row is as tall as its text needs, and TASK is sized to the widest
+    id present rather than clipped at 17 chars — so a question is readable where
     you are choosing between them rather than one keypress away. A block that outruns the space
     ends in `…` rather than stopping silently, and the briefing caps a long list of prior answers
     with `+N more` so the backlog context can't be pushed off screen.

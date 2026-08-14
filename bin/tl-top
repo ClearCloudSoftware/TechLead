@@ -504,25 +504,36 @@ def _selftest():
     layout = [QRow("question", "tl-open", "open", "q3", "q3  " + long_q),
               QRow("backlog", "fresh", "fresh", "", "never grilled")]
     W = 80
-    lines = inbox_lines(layout, W)
+    head_w, lines = inbox_lines(layout, W)
     check(all(len(t) <= W for _i, t in lines),
           "no inbox line may exceed the window: %r" % [len(t) for _i, t in lines])
     q3 = [t for i, t in lines if i == 0]
     check(len(q3) > 1, "a long detail must occupy several lines, not be clipped: %r" % q3)
     check(q3[0].startswith("● question tl-open"), "the first line carries the row's columns")
-    check(all(t[:_HEAD_W].strip() == "" for t in q3[1:]),
+    check(all(t[:head_w].strip() == "" for t in q3[1:]),
           "continuation lines must be blank in the WHAT/TASK columns: %r" % q3[1:])
-    rebuilt = " ".join(" ".join(t[_HEAD_W:] for t in q3).split())
+    rebuilt = " ".join(" ".join(t[head_w:] for t in q3).split())
     check(rebuilt == " ".join(layout[0].detail.split()),
           "the table must show the detail in FULL — nothing lost to the window edge:\n  want %r\n  got  %r"
           % (layout[0].detail, rebuilt))
     short = [t for i, t in lines if i == 1]
     check(len(short) == 1 and short[0].startswith("○ backlog")
-          and short[0][:_HEAD_W].rstrip().endswith("fresh")
-          and short[0][_HEAD_W:] == "never grilled",
+          and short[0][:head_w].rstrip().endswith("fresh")
+          and short[0][head_w:] == "never grilled",
           "a short detail still takes exactly one line, in its columns: %r" % short)
-    check(len(inbox_lines(layout, 400)[0][1]) < 400 and len(inbox_lines(layout, 400)) == 2,
-          "a wide window needs no wrapping at all")
+    check(len(inbox_lines(layout, 400)[1]) == 2, "a wide window needs no wrapping at all")
+    # the TASK column is the owner's own id, so it is sized to fit rather than clipped
+    check(head_w == 12 + 8, "short ids keep the column at its 8-char minimum: %d" % head_w)
+    real = [QRow("question", "tl-notes-file-location", "notes-file-location", "q11", "why?")]
+    for width in (80, 120):
+        hw, wl = inbox_lines(real, width)
+        check("tl-notes-file-location " in wl[0][1],
+              "a real id must never be clipped (it IS the id) at w=%d: %r" % (width, wl[0][1]))
+        check(hw == 12 + len("tl-notes-file-location"), "column sized to it: %d" % hw)
+    absurd = [QRow("question", "tl-" + "x" * 90, "s", "q1", "the prose still needs room")]
+    hw, wl = inbox_lines(absurd, 80)
+    check(hw <= 12 + 80 // 3 and all(len(t) < 80 for _i, t in wl),
+          "but the column is bounded, so one absurd id cannot crowd out the prose: hw=%d" % hw)
 
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
@@ -744,23 +755,27 @@ def _tabs(view):
 
 
 # ------------------------------------------------------------------------ view 1: inbox
-_HEAD_W = 29        # "● question tl-add-search     " — where the DETAIL column starts
-
-
 def inbox_lines(rows, w):
-    """[(row_index, text)] — one entry per SCREEN line, with DETAIL wrapped under its own column.
+    """(head_w, [(row_index, text)]) — one entry per SCREEN line, DETAIL wrapped under its column.
 
     A row is as tall as its text needs. The detail is a question or a worker's ask, written by a
     person, and the point of the list is to read it — so it wraps here rather than being clipped at
-    the window edge with the full text only available one keypress away. Pure, so the layout is
-    assertable without a terminal."""
+    the window edge with the full text only available one keypress away.
+
+    The TASK column is sized to the widest id actually present rather than a fixed width: ids are
+    `tl-` + the backlog slug, so they are as long as the owner's own naming, and a truncated one is
+    not an id any more. It is still bounded, so a single absurd slug can't crowd out the prose.
+    Pure, so the layout is assertable without a terminal."""
+    ids = [(r.task or r.slug) for r in rows] or [""]
+    task_w = min(max(8, max(len(i) for i in ids)), max(12, w // 3))
+    head_w = 12 + task_w        # "● " + what(8) + " " + task(task_w) + " "
     out = []
     for i, r in enumerate(rows):
         mark = "○" if r.what == "backlog" else "●"
-        head = "%s %-8s %-17s " % (mark, r.what[:8], (r.task or r.slug)[:17])
-        for j, ln in enumerate(_wrap(r.detail, max(8, w - _HEAD_W - 1))):
-            out.append((i, (head if j == 0 else " " * _HEAD_W) + ln))
-    return out
+        head = "%s %-8s %-*s " % (mark, r.what[:8], task_w, (r.task or r.slug)[:task_w])
+        for j, ln in enumerate(_wrap(r.detail, max(8, w - head_w - 1))):
+            out.append((i, (head if j == 0 else " " * head_w) + ln))
+    return head_w, out
 
 
 def _draw_inbox(win, st, q, data_dir):
@@ -768,7 +783,8 @@ def _draw_inbox(win, st, q, data_dir):
     rows = _filtered(q.rows, st["filter"])
     _bar(win, 0, " " + _tabs(1),
          "%d waiting · %d working " % (len(q.rows), len(q.quiet)))
-    _addln(win, 1, 0, "%-11s%-18s%s" % ("WHAT", "TASK", "DETAIL"), curses.A_UNDERLINE)
+    head_w, lines = inbox_lines(_filtered(q.rows, st["filter"]), w)
+    _addln(win, 1, 0, "%-11s%-*s%s" % ("WHAT", head_w - 11, "TASK", "DETAIL"), curses.A_UNDERLINE)
     if not rows:
         _addln(win, 3, 0, "  nothing is waiting on you." if not st["filter"]
                else "  nothing matches /%s" % st["filter"])
@@ -776,7 +792,6 @@ def _draw_inbox(win, st, q, data_dir):
         return
 
     sel = _index_of(rows, st["cursor"])
-    lines = inbox_lines(rows, w)
     body_h = max(3, (h - 5) * 2 // 3)      # wrapped rows are taller, so the list gets the bigger half
 
     # Rows are variable height now, so scroll by LINE while keeping the whole selected row on

@@ -76,6 +76,21 @@ bin/tl-onboard.sh /abs/path/to/repo  # brownfield: register an EXISTING repo in 
 bin/tl-new.sh myapp                  # greenfield: create ./myapp (empty) with its own .techlead/
 ```
 
+**Kickoff a greenfield project (optional).** A brand-new repo is empty, so its domain comes from you.
+`tl-kickoff` runs a short **interview right in the terminal** — no Claude Code app:
+
+```sh
+cd myapp && bin/tl-kickoff.sh        # asks one question at a time; answer each
+```
+
+Each turn is a discrete `claude -p` call; the conversation is kept in a transcript file, so a blank
+line pauses it and re-running resumes. When it has enough it drafts `CONTEXT.md` (uncommitted) and
+prints ready `tl-backlog add` lines — **review + commit `CONTEXT.md`, and run the backlog lines you
+want** (both are yours to approve). At a terminal it shows you the drafted `CONTEXT.md` rendered, and
+offers the seed backlog as a multi-select that adds what you pick; the copy-paste lines are printed
+either way. `<project>` is inferred from the current `.techlead`. For an
+*existing* repo, use `tl-scaffold-context` instead — it derives `CONTEXT.md` + `AGENTS.md` from the code.
+
 `tl-init` writes `config/instance.env`, which every `tl-*` command auto-loads — **env you already
 set in the shell still wins** — so you configure the harness/model once instead of every shell.
 `tl-onboard` (existing repo, registered at `ready` once baselined) and `tl-new` (new empty repo,
@@ -151,6 +166,12 @@ backlog (failing-id-per-line contract) and sets `test_command` for you — then 
 draft** (a test defines what "done" means, so it's yours to approve), commit it, and `tl-baseline`.
 It never baselines an unreviewed harness and never overwrites an existing `test.sh`. Existing repos
 with a known stack don't need it — `tl-onboard`/`tl-detect` already set `test_command`.
+
+**Onboarding docs.** `tl-scaffold-context myapp` drafts `AGENTS.md` (layout, current + deprecated
+conventions, danger zones) and `CONTEXT.md` (domain glossary) as real files, then stops. **Review
+them — the first `CONTEXT.md` especially is yours to check** — and commit. Once committed, the grill,
+review, and answer read them (a worker branches from `HEAD`), so the lead uses your project's
+vocabulary instead of guessing. It never overwrites an existing doc.
 
 > **Commit the test harness first.** `test_command` runs in the *worktree*, which a worker branches
 > from `HEAD` — so an **uncommitted** harness (or fixtures) is invisible to workers and to the gate,

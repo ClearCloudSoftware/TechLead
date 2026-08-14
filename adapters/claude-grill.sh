@@ -11,11 +11,17 @@ body="$(cat "$TL_GRILL_BODY" 2>/dev/null || true)"
 bank="$(awk '/^### /{n++; sub(/^### /,""); print "["n"] "$0}' "$TL_QUESTIONS" 2>/dev/null)"
 [ -n "$bank" ] || bank='(empty question bank)'
 decisions="$(cat "$TL_DECISIONS"/*.md 2>/dev/null || echo '(no prior decisions)')"
+context="$(cat "${TL_CONTEXT:-/dev/null}" 2>/dev/null || true)"   # project AGENTS.md + CONTEXT.md (#60)
+[ -n "$context" ] || context='(no project context docs — AGENTS.md / CONTEXT.md not committed yet)'
 
 prompt="Run a spec grill's INFERENCE PASS for backlog item '$TL_GRILL_SLUG': $TL_GRILL_TITLE.
 
 Item:
 $body
+
+Project context (the repo's AGENTS.md layout/conventions/danger zones + CONTEXT.md domain glossary) —
+use its vocabulary and respect its conventions:
+$context
 
 Numbered question bank (lead/questions.md) — pick the ones that apply:
 $bank

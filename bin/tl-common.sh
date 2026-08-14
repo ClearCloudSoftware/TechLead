@@ -232,6 +232,17 @@ tl_meta_set() { # id key value  (rewrite so last value wins on read — not an e
   mv "$tmp" "$f"
 }
 
+# tl_current_project — the sole project registered in the current .techlead (per-project state means one
+# per repo). Lets commands run from inside a project default the <name> arg instead of retyping it.
+# Non-zero if zero or more-than-one are registered (caller then requires an explicit name).
+tl_current_project() {
+  local d="$TL_DATA/projects" n=0 sole="" c
+  [ -d "$d" ] || return 1
+  for c in "$d"/*.conf; do [ -f "$c" ] || continue; n=$((n+1)); sole="$(basename "$c" .conf)"; done
+  [ "$n" -eq 1 ] || return 1
+  printf '%s\n' "$sole"
+}
+
 tl_now() { date +%s; }
 tl_mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }   # tl: macOS BSD stat — `stat -c %Y` on GNU
 

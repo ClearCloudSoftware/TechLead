@@ -5,7 +5,8 @@
 # tl: `eval` on operator-configured command — trusted registry only, never worker input
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
-name="${1:?usage: tl-baseline NAME}"
+name="${1:-}"
+[ -n "$name" ] || name="$(tl_current_project)" || tl_die "run from inside a project (or pass its name). Registered here: $(ls "$TL_DATA/projects" 2>/dev/null | sed 's/\.conf$//' | tr '\n' ' ')"
 path="$("$BIN/tl-project.sh" get "$name" path)"         || tl_die "unknown project: $name"
 cmd="$("$BIN/tl-project.sh" get "$name" test_command)"  || tl_die "no test_command for $name"
 out="$TL_DATA/projects/$name.baseline"

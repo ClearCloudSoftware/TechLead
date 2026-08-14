@@ -98,6 +98,8 @@ Persist tasks; list with a 1-based index.
 ## risky: A change that regresses a test
 
 ## bad-idea: Rewrite it in assembly for speed
+
+## resume-me: An item whose first grill was interrupted
 EOF
 
 echo "== B1: tl-run STOPS at an open spec, dispatching nothing =="
@@ -153,5 +155,19 @@ echo "== B5: a rejected item halts and dispatches nothing =="
 grep -q "rejected" /tmp/rs-b5.log || fail "B5: tl-run did not honor the reject: $(cat /tmp/rs-b5.log)"
 [ ! -f "$TL_STATE/tl-bad-idea.meta" ] || fail "B5: dispatched a rejected item"
 echo "  B5 ok — rejected item halts, nothing dispatched"
+
+echo "== B6: an interrupted grill (spec exists but never finalized) self-heals on re-run =="
+# Simulate a grill that died before _finalize (e.g. TL_GRILL_CMD was unset on the first run): the
+# spec file exists, state=drafted, with zero questions. Old tl-run keyed on "file exists" and would
+# skip the grill forever — wedged. Now it re-grills a drafted-with-0-open spec automatically.
+"$BIN/tl-spec.sh" init tl-resume-me resume-me "An item whose first grill was interrupted" >/dev/null
+[ "$("$BIN/tl-spec.sh" get tl-resume-me state)" = drafted ] || fail "B6 setup: spec should be drafted"
+[ "$("$BIN/tl-spec.sh" open-count tl-resume-me)" -eq 0 ]     || fail "B6 setup: expected 0 open (grill not run yet)"
+"$BIN/tl-run.sh" resume-me >/tmp/rs-b6.log 2>&1 || true
+grep -q "grill" /tmp/rs-b6.log || fail "B6: tl-run did not re-grill the interrupted spec: $(cat /tmp/rs-b6.log)"
+[ "$("$BIN/tl-spec.sh" qlist tl-resume-me | grep -c .)" -gt 0 ] || fail "B6: grill did not run (no questions added)"
+[ "$("$BIN/tl-spec.sh" open-count tl-resume-me)" -gt 0 ] || fail "B6: expected the re-grill to surface the owner's open question"
+[ ! -f "$TL_STATE/tl-resume-me.meta" ] || fail "B6: dispatched despite a fresh open question"
+echo "  B6 ok — interrupted grill re-ran on tl-run; no longer wedged, halted at the new open question"
 
 echo "PASS: tl-spawn resolves + refuses by name; tl-run stops at spec & gate, hands off, and is resumable"

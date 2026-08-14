@@ -20,9 +20,19 @@ slug="${1:?usage: tl-run [resume] <backlog-slug>}"
 id="tl-$(slugify "$slug")"
 count_q() { "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v k="$1" '$3==k{c++} END{print c+0}'; }
 
-# ---- stage: grill (create the spec if it does not exist yet) ----
+# ---- stage: grill (create the spec if it does not exist yet, or resume an interrupted pass) ----
+# Resumability: re-grill not only when the spec is absent, but also when it exists yet the grill
+# never finalized — a `drafted` spec with 0 open questions. _finalize sets `specified` (0 open) or
+# `drafted` *with* the open deltas (open > 0), so "drafted AND 0 open" can only mean the driver died
+# before _finalize (e.g. TL_GRILL_CMD unset on the first run). Without this, that wedges tl-run: the
+# spec file exists so the grill is skipped forever, breaking the "just re-run tl-run" promise.
 spec="$("$BIN/tl-spec.sh" path "$id")"
-if [ ! -f "$spec" ]; then tl_log "run[$id]: grill"; "$BIN/tl-grill.sh" "$slug"; fi
+regrill=0
+if [ ! -f "$spec" ]; then regrill=1
+elif [ "$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)" = drafted ] \
+  && [ "$("$BIN/tl-spec.sh" open-count "$id" 2>/dev/null || echo 0)" -eq 0 ]; then regrill=1
+fi
+if [ "$regrill" -eq 1 ]; then tl_log "run[$id]: grill"; "$BIN/tl-grill.sh" "$slug"; fi
 
 # ---- STOP 1: spec approval / reject (owner judgment — never auto-answered) ----
 state="$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)"

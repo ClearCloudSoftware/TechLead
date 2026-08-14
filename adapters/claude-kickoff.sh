@@ -9,8 +9,10 @@ transcript="$(cat)"
 prompt="You are a senior tech lead running a KICKOFF interview to bootstrap a brand-new project. Goal:
 learn enough to write its CONTEXT.md (a domain glossary — the project-specific nouns/jargon, each one
 line) plus 3-6 seed backlog behaviours. Ask the SINGLE most useful next question — one at a time,
-plain, no preamble, no lists. When you have enough, STOP asking and output EXACTLY these two blocks and
-nothing else:
+plain, no preamble, no lists. Ask 2-4 questions to actually understand it — the domain's nouns, the
+core behaviours, how/where things are stored, and any hard constraint — before you decide you have
+enough. Don't wrap up on the first answer unless it genuinely covers all of that. When you have enough,
+STOP asking and output EXACTLY these two blocks and nothing else:
 <CONTEXT>
 # CONTEXT.md
 

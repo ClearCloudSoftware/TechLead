@@ -50,7 +50,10 @@ while :; do
         echo "tl: seed backlog — run the ones you want:" >&2
         printf '%s\n' "$backlog" | while IFS='|' read -r slug title desc; do
           [ -n "$slug" ] || continue
-          printf '      tl-backlog add %s %s %s\n' "$slug" "$(printf %q "$title")" "$(printf %q "$desc")" >&2
+          # readable + paste-safe: double-quote, escaping only the chars special inside double quotes
+          qt="$(printf '%s' "$title" | sed 's/[\\"$`]/\\&/g')"
+          qd="$(printf '%s' "$desc"  | sed 's/[\\"$`]/\\&/g')"
+          printf '      tl-backlog add %s "%s" "%s"\n' "$slug" "$qt" "$qd" >&2
         done
       fi
       exit 0 ;;

@@ -22,6 +22,7 @@ chmod +x "$PROJ/tools/failing.sh"
 git -C "$PROJ" add -A && git -C "$PROJ" -c user.email=t@t -c user.name=t commit -q -m init
 
 WORK="$(mktemp -d)"
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$REPO" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_WORKTREES="$WORK/state/wt"
 export TL_WORKER_CMD="$REPO/test/change-worker.sh"
 cleanup() { rm -rf "$PROJ" "$WORK"; }; trap cleanup EXIT

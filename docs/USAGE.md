@@ -15,6 +15,19 @@ for zero tokens while idle, grill a backlog item into a spec, and deliver a revi
   with the bundled demo workers, which need no agent and spend no tokens.
 - macOS or Linux. (Scripts target bash 3.2, macOS's default; BSD `stat`/`date` are used — see
   the `# tl:` ceilings in the scripts for the GNU swaps.)
+- **Optional:** [`gum`](https://github.com/charmbracelet/gum) (`brew install gum`), `fzf`, `glow`,
+  or any `$PAGER`. With gum on `PATH` and a terminal attached you get pickers instead of typed
+  answers, a spinner over the slow steps (test suites, model calls), boxed tables and refusals,
+  level-tagged log lines, and a fuzzy picker when you omit a task id or backlog slug. Without them
+  everything falls back to numbered menus and plain text. **Nothing requires them** — every fallback
+  is exercised by `test/prompt-smoke.sh`.
+- Output is colourised only when stdout is a terminal; `NO_COLOR=1` turns it off. Piped or captured
+  output is plain, so scripts and greps see exactly what they saw before. Question, finding, and
+  ledger lists (`tl-cost report`, `tl-metric report`/`outcome`) render as a `gum table` when gum is
+  installed **and** stdout is a terminal — captured output stays whitespace-columned so
+  `tl-cost report | awk '$1=="worker"{print $2}'` keeps working. `TL_NO_TABLE=1` forces the plain
+  form: use it in a narrow terminal (gum truncates long cells rather than wrapping), or in the rare
+  pty that doesn't answer terminal queries, where gum would block waiting for a reply.
 
 ## Concepts
 
@@ -73,7 +86,9 @@ cd myapp && bin/tl-kickoff.sh        # asks one question at a time; answer each
 Each turn is a discrete `claude -p` call; the conversation is kept in a transcript file, so a blank
 line pauses it and re-running resumes. When it has enough it drafts `CONTEXT.md` (uncommitted) and
 prints ready `tl-backlog add` lines — **review + commit `CONTEXT.md`, and run the backlog lines you
-want** (both are yours to approve). `<project>` is inferred from the current `.techlead`. For an
+want** (both are yours to approve). At a terminal it shows you the drafted `CONTEXT.md` rendered, and
+offers the seed backlog as a multi-select that adds what you pick; the copy-paste lines are printed
+either way. `<project>` is inferred from the current `.techlead`. For an
 *existing* repo, use `tl-scaffold-context` instead — it derives `CONTEXT.md` + `AGENTS.md` from the code.
 
 `tl-init` writes `config/instance.env`, which every `tl-*` command auto-loads — **env you already
@@ -211,12 +226,18 @@ driver, which answers what it can (`source: inferred`) and marks the rest `open`
 everything is inferable, the spec goes straight to `specified`. Otherwise, answer the delta:
 
 ```sh
-tl-grill.sh answer tl-add-farewell q2 decided "Staging, then prod-eu, then prod-us"
+tl-grill.sh answer tl-add-farewell        # walks the open questions, one at a time, in this terminal
+tl-grill.sh answer tl-add-farewell q2 decided "Staging, then prod-eu, then prod-us"   # or one shot
 tl-grill.sh show   tl-add-farewell
 ```
 
 `answer_state` is one of `decided` (a constraint), `leaning` (a default the worker may challenge),
 `open` (must be answered before briefing), `spike` (resolve by building).
+
+Bare `answer <id>` prompts for the state and the text per open question — picker UI if you have
+[`gum`](https://github.com/charmbracelet/gum) or `fzf` installed, a numbered menu otherwise. It needs
+a terminal: with no tty it refuses rather than rubber-stamp the inferred answers. `TL_ANSWER_GRILL_<qid>_STATE`
+/ `_TEXT` pre-answer a single question if you want to script part of the walk.
 
 Refuse an item outright — the most senior move:
 
@@ -230,7 +251,7 @@ closed, #49). To bootstrap the bank, let the lead *propose* candidate questions 
 
 ```sh
 tl-grill.sh propose add-farewell     # -> data/proposals/question-add-farewell.md (candidates, NOT in lead/)
-# open the file, delete the ones you don't want, then:
+tl-grill.sh prune   add-farewell     # multi-select the keepers (or edit the file by hand — same thing)
 tl-grill.sh promote add-farewell     # appends the survivors to lead/questions.md (provisional, hits:0)
 tl-run.sh add-farewell               # re-grills against the now-seeded bank
 ```

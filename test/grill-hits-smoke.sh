@@ -6,6 +6,7 @@ set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"; BIN="$REPO/bin"
 fail() { echo "FAIL: $1"; exit 1; }
 WORK="$(mktemp -d)"
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$WORK/inst" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_LEAD="$WORK/inst/lead"
 export TL_WORKTREES="$WORK/state/wt" TL_BACKLOG="$WORK/data/backlog.md"
 export TL_GRILL_CMD="$REPO/test/demo-grill-hits.sh"

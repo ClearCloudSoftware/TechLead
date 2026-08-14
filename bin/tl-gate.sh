@@ -5,7 +5,7 @@
 # (tl-classify, #55); an empty rubric fails closed to `ask-user`. Exits non-zero while any finding is unresolved or marked `fix`.
 # tl: `eval` on operator test_command — trusted registry only; assumes no spaces in changed paths
 set -eu
-BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
 TAB="$(printf '\t')"
 id="${1:?usage: tl-gate ID}"
 [ "$(tl_meta_get "$id" kind)" = change ] || tl_die "gate is for change tasks"
@@ -21,7 +21,12 @@ cmd="$(pget test_command)"; baseline="$(pget baseline)"; danger="$(pget danger_p
 # runner — otherwise reads as "0 failures" and merges anything (fail OPEN). A worker's worktree
 # branches from HEAD, so an uncommitted harness is exactly this case (see tl_warn_uncommitted).
 curfail="$(mktemp)"; rawout="$(mktemp)"; trc=0
-if [ -n "$cmd" ]; then ( cd "$wt" && eval "$cmd" ) >"$rawout" 2>/dev/null || trc=$?; fi
+# Redirections inside the command (see tl_spin); trc must still be the harness's own exit status,
+# which gum spin propagates unchanged.
+if [ -n "$cmd" ]; then
+  tl_spin "gate: running the test harness in the worktree…" \
+    sh -c "cd '$wt' && { $cmd; } >'$rawout' 2>/dev/null" || trc=$?
+fi
 sort -u "$rawout" > "$curfail"
 regressions="$(comm -13 "$baseline" "$curfail" 2>/dev/null || true)"
 
@@ -55,7 +60,7 @@ set +f
 # tl: runs only when a judge is configured (TL_SPECDIFF_CMD); unconfigured = skipped for Phase-0
 #     bootstrap. Upgrade: make the judge mandatory once the crew ships a configured review harness.
 if [ -n "${TL_SPECDIFF_CMD:-}" ]; then
-  "$BIN/tl-specdiff.sh" run "$id" || true
+  tl_spin "gate: spec-axis judge…" "$BIN/tl-specdiff.sh" run "$id" || true
   "$BIN/tl-specdiff.sh" findings "$id" >> "$tmp" || true
 fi
 # classify each finding via the rubric router (#55): rule -> class + class_source. Unknown -> ask-user.
@@ -81,13 +86,44 @@ git -C "$wt" --no-pager diff --stat "$base"..HEAD 2>/dev/null | sed 's/^/  /' ||
 # D13 approval input (E1.5). A clean change (0 findings) costs ~no owner time, so nothing is recorded.
 if [ "$count" -gt 0 ]; then
   t0="$(date +%s)"
-  jq -r '.[]|"  ["+.id+"] "+.rule+": "+.detail' "$findings"
+  jq -r '.[]|[.id,.class,.rule,.detail]|@tsv' "$findings" | tl_table "ID,CLASS,RULE,DETAIL"
+  # Read-only navigator for a set too big to take in at once. DELIBERATELY not a resolve UI: §2.3.1
+  # makes this gate a one-at-a-time chokepoint, and a selectable list is how bulk-approving starts.
+  # Selecting a row shows that finding in full (gum table truncates long detail); Esc just moves on.
+  if [ "$count" -gt 5 ] && [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1 \
+     && { exec 4</dev/tty; } 2>/dev/null; then
+    ddir="$(mktemp -d)"
+    while :; do
+      sel="$(jq -r '.[]|[.id,.class,.rule,.detail]|@tsv' "$findings" \
+             | gum table --separator="$TAB" --columns="ID,CLASS,RULE,DETAIL" --height 12 <&4)" || break
+      # gum's selected-row encoding is its business; the finding id is the leading alphanumeric run.
+      fsel="$(printf '%s' "$sel" | sed 's/[^A-Za-z0-9].*//')"
+      [ -n "$fsel" ] || break
+      jq -r --arg i "$fsel" '.[]|select(.id==$i)
+        |"# "+.id+"\n\n- rule: `"+.rule+"`\n- class: "+.class+" ("+.class_source+")\n- path: "
+         +(.path//"—")+"\n\n"+.detail' "$findings" > "$ddir/finding.md"
+      [ -s "$ddir/finding.md" ] || break
+      tl_page "$ddir/finding.md"
+    done
+    rm -rf "$ddir"; exec 4<&-
+  fi
   if [ "${TL_APPROVE:-}" = "yes" ]; then
     jq --arg r "${TL_RESOLVE:-approve}" 'map(.resolved=$r)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
-  elif exec 3</dev/tty 2>/dev/null; then
+  # The braces matter: `exec 3</dev/tty 2>/dev/null` applies BOTH redirections to the current shell
+  # permanently, so every later stderr write — including the "gate blocked" refusal — went to
+  # /dev/null once the interactive branch was taken. Grouping scopes the silencing to the exec.
+  elif { exec 3</dev/tty; } 2>/dev/null; then
     for fid in $(jq -r '.[].id' "$findings"); do
-      printf 'resolve [%s] approve/skip/fix? [approve] ' "$fid"
-      read -r a <&3 || a=approve; a="${a:-approve}"
+      # Re-show the finding at the moment of the decision — the list was printed once, findings ago.
+      jq -r --arg i "$fid" '.[]|select(.id==$i)|"\n["+.id+"] "+.rule+": "+.detail' "$findings" >&2
+      # Prompt via the shared helper (gum/fzf picker when installed, numbered menu otherwise), reading
+      # the controlling tty on fd 3 — NOT stdin, which the caller may have piped. TL_ANSWER_RESOLVE_<fid>
+      # can pre-answer a single finding; TL_APPROVE=yes above still owns the bulk non-interactive path.
+      # TL_YES blanked deliberately: it is the wizards' "take every default" switch, and a stray one
+      # in the operator's shell would approve every finding here without asking. TL_APPROVE above is
+      # the gate's own explicit bulk switch — the only way to resolve findings without a human.
+      a="$(TL_YES= tl_choose "RESOLVE_$fid" "resolve [$fid]" approve approve skip fix <&3)"
+      a="${a:-approve}"
       jq --arg i "$fid" --arg a "$a" 'map(if .id==$i then .resolved=$a else . end)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
     done
     exec 3<&-

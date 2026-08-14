@@ -12,11 +12,12 @@
 # After spawning it hands supervision to tl-watch and RETURNS — it never babysits the worker, and it
 # never auto-answers an open question or auto-resolves a finding.
 set -eu
-BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
 slugify() { printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//'; }
 
 [ "${1:-}" = resume ] && shift          # `tl-run resume <slug>` == `tl-run <slug>` (always resumable)
-slug="${1:?usage: tl-run [resume] <backlog-slug>}"
+slug="${1:-$(tl_pick_slug || true)}"     # no slug at a terminal -> fuzzy-pick from the backlog
+[ -n "$slug" ] || tl_die "usage: tl-run [resume] <backlog-slug>"
 id="tl-$(slugify "$slug")"
 count_q() { "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v k="$1" '$3==k{c++} END{print c+0}'; }
 
@@ -46,13 +47,15 @@ if [ "$state" != rejected ] && [ "$(total_q)" -eq 0 ]; then
   # auto-spend a model call for every operator, including opencode setups that have no claude.
   if [ -n "${TL_GRILL_PROPOSE_CMD:-}" ]; then
     [ -f "$prop" ] || { tl_log "run[$id]: no questions in the bank — drafting candidates (proposer)…"; "$BIN/tl-grill.sh" propose "$slug" >/dev/null 2>&1 || true; }
-    echo "tl-run: STOP — no questions in the bank for '$slug'; I drafted candidates for you to curate."
-    echo "  candidates: $prop"
-    echo "  next: prune the ones you don't want, then:  tl-grill promote $slug  →  tl-run $slug"
+    tl_stop "no questions in the bank for '$slug'; I drafted candidates for you to curate."
+    tl_note "$prop"
+    tl_kv prune "tl-grill prune $slug      (pick the keepers in the terminal)"
+    tl_kv then  "tl-grill promote $slug  →  tl-run $slug"
   else
-    echo "tl-run: STOP — '$id' has no grilled questions; refusing to dispatch un-grilled work."
-    echo "  cause: $TL_LEAD/questions.md is empty (#49) — the grill applies your question bank, and there isn't one yet."
-    echo "  fix:   add the questions to ask, then re-run: tl-run $slug  (or: tl-grill propose $slug to draft candidates)"
+    tl_stop "'$id' has no grilled questions; refusing to dispatch un-grilled work."
+    tl_kv cause "$TL_LEAD/questions.md is empty (#49) — the grill applies your question bank, and there isn't one yet."
+    tl_kv fix   "add the questions to ask, then re-run: tl-run $slug"
+    tl_kv or    "tl-grill propose $slug   (draft candidates for you to curate)"
   fi
   exit 0
 fi
@@ -61,20 +64,21 @@ fi
 state="$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)"
 case "$state" in
   rejected)
-    echo "tl-run: STOP — '$id' was rejected; nothing dispatched."
+    tl_stop "'$id' was rejected; nothing dispatched."
     awk 'f{print} /^## Rejected/{f=1}' "$spec" | sed 's/^/  /'
     exit 0 ;;
   specified) : ;;   # zero open questions → auto-advance (owner may still inspect the spec below)
   *)
-    echo "tl-run: STOP — spec '$id' is '$state' with $("$BIN/tl-spec.sh" open-count "$id") open question(s); not dispatching."
-    "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '$2=="open"{printf "  open [%s] %s\n",$1,$5}'
-    echo "  answer:  tl-grill answer $id <qid> <decided|leaning|spike> [text]"
-    echo "  or:      tl-grill reject $id <reason>"
-    echo "  then:    tl-run $slug"
+    tl_stop "spec '$id' is '$state' with $("$BIN/tl-spec.sh" open-count "$id") open question(s); not dispatching."
+    "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v OFS='\t' '$2=="open"{print $1,$5}' \
+      | tl_table "QID,OPEN QUESTION"
+    tl_kv answer "tl-grill answer $id        (walks the open ones in the terminal)"
+    tl_kv or     "tl-grill reject $id <reason>"
+    tl_kv then   "tl-run $slug"
     exit 0 ;;
 esac
-echo "tl-run: spec '$id' specified — $(count_q inferred) inferred, $(count_q owner) owner-answered, 0 open"
-echo "        ($spec)"
+tl_ok "spec '$id' specified — $(count_q inferred) inferred, $(count_q owner) owner-answered, 0 open"
+tl_note "$spec"
 
 # ---- stage: brief (deterministic) ----
 brief="$TL_DATA/$id/brief.md"
@@ -88,9 +92,9 @@ if [ ! -f "$brief" ]; then tl_log "run[$id]: brief"; "$BIN/tl-brief.sh" "$id"; f
 if [ ! -f "$(tl_meta_file "$id")" ]; then
   tl_log "run[$id]: spawn"
   "$BIN/tl-spawn.sh" "$id"
-  echo "tl-run: dispatched '$id' and left it supervised — do NOT babysit the worker."
-  echo "  supervise: tl-watch            (or 'tl-watch --once'; it wakes you when the task is ready)"
-  echo "  resume:    tl-run $slug        (re-run once the worker reaches 'done' → gate/deliver)"
+  tl_ok "dispatched '$id' and left it supervised — do NOT babysit the worker."
+  tl_kv watch "tl-watch                  (or 'tl-watch --once'; it wakes you when the task is ready)"
+  tl_kv resume "tl-run $slug        (re-run once the worker reaches 'done' → gate/deliver)"
   exit 0
 fi
 
@@ -101,7 +105,7 @@ case "$st" in
     echo "tl-run: '$id' still working (tl-state=working) — supervise with tl-watch; re-run 'tl-run $slug' when done."
     exit 0 ;;
   failed)
-    echo "tl-run: STOP — worker '$id' failed."
+    tl_stop "worker '$id' failed."
     "$BIN/tl-peek.sh" "$id" 20 2>/dev/null | sed 's/^/  /' || true
     exit 1 ;;
   done) : ;;
@@ -119,17 +123,17 @@ if [ "$kind" = change ]; then
   # or refuses while any finding is unresolved. tl-run does not set TL_APPROVE — it never auto-resolves.
   echo "tl-run: gate + deliver '$id' — resolve any findings (approve / skip / fix)."
   if "$BIN/tl-deliver.sh" "$id"; then
-    echo "tl-run: delivered '$id'."
+    tl_ok "delivered '$id'."
   else
-    echo "tl-run: STOP — delivery halted for '$id' (unresolved gate findings, or not fast-forwardable)."
-    echo "  findings: $TL_DATA/$id/findings.json"
-    echo "  resolve, then re-run: tl-run $slug"
+    tl_stop "delivery halted for '$id' (unresolved gate findings, or not fast-forwardable)."
+    tl_kv findings "$TL_DATA/$id/findings.json"
+    tl_kv then "resolve, then re-run: tl-run $slug"
     exit 3
   fi
 else
   # plan: the terminal step is the owner approving the report — a decision point, never auto-run.
-  echo "tl-run: STOP — plan report for '$id' is ready for review."
-  echo "  report:  $(tl_meta_get "$id" report)"
-  echo "  approve: tl-approve $id        (tl-run does not auto-approve)"
+  tl_stop "plan report for '$id' is ready for review."
+  tl_kv report "$(tl_meta_get "$id" report)"
+  tl_kv approve "tl-approve $id        (tl-run does not auto-approve)"
   exit 0
 fi

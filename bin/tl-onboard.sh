@@ -13,6 +13,8 @@ while [ $# -gt 0 ]; do case "$1" in
   -*) tl_die "unknown arg: $1";;
   *) raw="$1"; shift;;
 esac; done
+# No path given at a terminal: browse for it rather than making the owner go find and paste one.
+[ -n "$raw" ] || raw="$(tl_ask_dir ONBOARD_PATH "pick the repo to onboard" "$PWD" || true)"
 [ -n "$raw" ] || tl_die "usage: tl-onboard <repo-path> [--yes]"
 [ -d "$raw" ] || tl_die "no such directory: $raw"
 

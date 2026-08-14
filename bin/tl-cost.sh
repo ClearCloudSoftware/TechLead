@@ -25,10 +25,9 @@ case "${1:-}" in
     awk -F'\t' -v f="${2:-}" '
       f==""||$2==f { ci[$3]+=$4; co[$3]+=$5; cc[$3]+=($6+0); ti+=$4; to+=$5; tc+=($6+0) }
       END {
-        printf "%-14s %12s %12s %12s\n","category","input","output","cost_usd"
-        for (k in ci) printf "%-14s %12d %12d %12.4f\n",k,ci[k],co[k],cc[k]
-        printf "%-14s %12d %12d %12.4f\n","TOTAL",ti,to,tc
-      }' "$LEDGER"
+        for (k in ci) printf "%s\t%d\t%d\t%.4f\n",k,ci[k],co[k],cc[k]
+        printf "%s\t%d\t%d\t%.4f\n","TOTAL",ti,to,tc
+      }' "$LEDGER" | tl_table "CATEGORY,INPUT,OUTPUT,COST_USD"
     ;;
   *) tl_die "usage: tl-cost record <id> <category> <input> <output> [cost_usd] | record-json <id> <category> (JSON on stdin) | report [id]";;
 esac

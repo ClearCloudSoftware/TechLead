@@ -25,5 +25,11 @@ add "$TL_LEAD/principles.md"
 if [ ! -s "$corpus" ]; then rm -f "$corpus"; echo "I don't know — your written record is empty."; exit 0; fi
 
 : "${TL_ANSWER_CMD:?tl: no answer engine — set TL_ANSWER_CMD (e.g. adapters/claude-answer.sh)}"
-TL_ANS_Q="$q" TL_ANS_CORPUS="$corpus" $TL_ANSWER_CMD
-rm -f "$corpus"
+# Answer to a file so the model call can run under a spinner and the result can be paged: an
+# `answer` is prose the owner reads, and a long one used to scroll past before they could.
+adir="$(mktemp -d)"
+export TL_ANS_Q="$q" TL_ANS_CORPUS="$corpus"
+tl_spin "answering from your written record…" sh -c "$TL_ANSWER_CMD > '$adir/answer.md'" \
+  || tl_log "answer engine exited non-zero — showing whatever it produced"
+tl_page "$adir/answer.md"
+rm -rf "$corpus" "$adir"

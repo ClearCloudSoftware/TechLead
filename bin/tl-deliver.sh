@@ -4,8 +4,9 @@
 # The gate is a removed capability, not an instruction: this path simply will not deliver while a
 # finding is unresolved.
 set -eu
-BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
-id="${1:?usage: tl-deliver ID}"
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
+id="${1:-$(tl_pick_task || true)}"
+[ -n "$id" ] || tl_die "usage: tl-deliver ID"
 [ "$(tl_meta_get "$id" kind)" = change ] || tl_die "deliver is for change tasks"
 project="$(tl_meta_get "$id" project)"; wt="$(tl_meta_get "$id" worktree)"
 branch="$(tl_meta_get "$id" branch)"; base="$(tl_meta_get "$id" base)"; pname="$(tl_meta_get "$id" pname)"

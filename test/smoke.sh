@@ -14,6 +14,7 @@ PROJ="$(mktemp -d)"; git -C "$PROJ" init -q
 git -C "$PROJ" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 # temp instance home (isolates data/ state/ from the real repo) with the TL_HOME marker
 HOME_="$(mktemp -d)"
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$REPO"                                  # real instance: has bin/ and AGENTS.md
 export TL_DATA="$HOME_/data" TL_STATE="$HOME_/state" TL_WORKTREES="$HOME_/state/wt"
 export TL_WORKER_CMD="$REPO/test/demo-worker.sh"

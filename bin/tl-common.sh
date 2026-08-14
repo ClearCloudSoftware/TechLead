@@ -18,7 +18,11 @@ fi
 # place instead of every shell. The file (written by tl-init, single owner) uses conditional
 # assignments — `export X="${X:-val}"` — so anything already set in the shell wins over the file.
 # Absent file is a silent no-op. tl-init writes to this same path.
-TL_CONFIG="${TL_CONFIG:-$TL_HOME/config/instance.env}"; export TL_CONFIG
+# `-`, not `:-`: an explicitly EMPTY TL_CONFIG means "load no instance config", which is how a test
+# stays hermetic. Without that opt-out the suite silently inherits whatever `tl-init` wrote into this
+# checkout — real adapters included, so a smoke run in an initialised checkout could call a model and
+# spend tokens. (`:-` would treat the empty value as unset and helpfully hand the file back.)
+TL_CONFIG="${TL_CONFIG-$TL_HOME/config/instance.env}"; export TL_CONFIG
 [ -f "$TL_CONFIG" ] && . "$TL_CONFIG"
 
 # Per-project state (owner decision 2026-08-14): data/state/lead live in <project>/.techlead, NOT
@@ -44,8 +48,189 @@ TL_WORKTREES="${TL_WORKTREES:-$TL_STATE/wt}"
 mkdir -p "$TL_DATA" "$TL_STATE" "$TL_WORKTREES"
 export TL_HOME TL_DATA TL_STATE TL_LEAD TL_WORKTREES   # so a spawned worker inherits its instance
 
-tl_log() { printf 'tl: %s\n' "$*" >&2; }
-tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }
+tl_log() { _tl_say info "$*" >&2; }
+tl_die() { _tl_say error "$1" >&2; exit "${2:-1}"; }
+# Level-tagged when someone is watching, plain `tl: …` otherwise. The gate matters: worker output is
+# captured and read back through tl-peek, and the smoke tests grep these lines.
+_tl_say() {
+  local lvl="$1"; shift
+  if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+    gum log --level "$lvl" --prefix tl "$*"
+  else
+    printf 'tl: %s\n' "$*"
+  fi
+}
+
+# Presentation (single owner: this file). Every tl-* line used to land with identical weight — a
+# refusal read like a progress note. Colour separates "you must act" from "for your information".
+# Gated on stdout being a tty, so captured output (`x="$(tl-spec.sh path ...)"`, pipes, the smoke
+# tests' logs) is byte-identical to before — no escape codes ever reach a file or a grep.
+# NO_COLOR (https://no-color.org) and TERM=dumb turn it off.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ] && command -v tput >/dev/null 2>&1; then
+  TL_C_STOP="$(tput setaf 1 2>/dev/null || true)$(tput bold 2>/dev/null || true)"
+  TL_C_OK="$(tput setaf 2 2>/dev/null || true)"
+  TL_C_KEY="$(tput setaf 6 2>/dev/null || true)"
+  TL_C_DIM="$(tput dim 2>/dev/null || true)"
+  TL_C_0="$(tput sgr0 2>/dev/null || true)"
+  TL_DECORATE=1
+else
+  TL_C_STOP=""; TL_C_OK=""; TL_C_KEY=""; TL_C_DIM=""; TL_C_0=""
+  TL_DECORATE=""
+fi
+
+TL_PROG="$(basename "$0" .sh)"; case "$TL_PROG" in tl-*) ;; *) TL_PROG=tl;; esac
+tl_stop() {   # owner must act — the loudest thing the toolbelt prints, so give it a frame
+  if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+    gum style --border normal --border-foreground 1 --foreground 1 --padding "0 1" \
+      "$TL_PROG: STOP — $*"
+  else
+    printf '%s%s: STOP%s — %s\n' "$TL_C_STOP" "$TL_PROG" "$TL_C_0" "$*"
+  fi
+}
+tl_ok()   { printf '%s%s: %s%s\n' "$TL_C_OK" "$TL_PROG" "$*" "$TL_C_0"; }            # it worked
+tl_kv()   { printf '  %s%-7s%s %s\n' "$TL_C_KEY" "$1:" "$TL_C_0" "$2"; }   # cause:/fix:/next: lines
+tl_note() { printf '  %s%s%s\n' "$TL_C_DIM" "$*" "$TL_C_0"; }              # paths, provenance
+
+# tl_table "Col1,Col2,…"  <- TAB-separated rows on stdin. The single owner of tabular DISPLAY;
+# the machine-readable forms (tl-spec qlist's pipe encoding, findings.json) are untouched, so
+# nothing that parses this data goes through here.
+#   watched at a terminal, gum installed -> `gum table --print` (bordered)
+#   otherwise -> an awk that measures each column. NOT `column -t`: BSD column silently drops
+#                empty fields, so one null path shifts every later cell into the wrong column.
+# The box is gated on TL_DECORATE (stdout is a tty) for the same reason as colour, and it matters
+# more here: `tl-cost report | awk '$1=="answer"{print $2}'` is a real caller, and box-drawing
+# characters would shift every field. Captured output stays whitespace-columned and parseable.
+#
+# WRAPPING: neither gum table nor `--widths` wraps — a long question was simply cut off, which is
+# the one thing a decision table must not do. So the renderer wraps here, and gum grows the row:
+# lipgloss makes a cell taller when it contains newlines, and gum's CSV reader accepts them inside a
+# quoted field. Only the WIDEST column is wrapped (in every table here that is the free-text one),
+# to whatever width the fixed columns leave. Wrapping is skipped entirely when not decorating, so
+# captured output keeps exactly one line per record and every `awk '$1==...'` caller still works.
+# Buffered to a temp file first so a gum failure falls back to awk instead of eating the rows.
+# TL_NO_TABLE=1 forces the plain form.
+tl_table() {
+  local cols="$1" t avail; t="$(mktemp)"; cat > "$t"
+  [ -s "$t" ] || { rm -f "$t"; return 0; }
+  # 10000 = "never wrap": captured output must stay one physical line per record.
+  if [ -n "${TL_DECORATE:-}" ]; then avail="$(tput cols 2>/dev/null || echo 80)"; else avail=10000; fi
+  if [ -n "${TL_DECORATE:-}" ] && [ -z "${TL_NO_TABLE:-}" ] && command -v gum >/dev/null 2>&1 &&
+     _tl_table_awk "$cols" "$avail" gum < "$t" \
+       | gum table --print --lazy-quotes --separator="$(printf '\t')" --columns="$cols" 2>/dev/null
+  then rm -f "$t"; return 0; fi
+  _tl_table_awk "$cols" "$avail" plain < "$t"
+  rm -f "$t"
+}
+
+# _tl_table_awk <cols> <avail> <gum|plain>  — TSV in, wrapped rows out.
+#   gum   -> data rows only, TAB-joined, CSV-quoted so an embedded newline survives to lipgloss
+#   plain -> the aligned table, a wrapped cell continuing on further lines with its neighbours blank
+_tl_table_awk() {
+  awk -F'\t' -v hdr="$1" -v avail="$2" -v mode="$3" -v k="$TL_C_KEY" -v z="$TL_C_0" '
+    function wrap(s, width,   out,line,i,nw,parts,word) {
+      if (length(s) <= width) return s
+      nw = split(s, parts, " "); out=""; line=""
+      for (i=1;i<=nw;i++) {
+        word = parts[i]
+        while (length(word) > width) {                 # an unbreakable token: hard-chop it
+          if (line != "") { out = out line "\n"; line="" }
+          out = out substr(word,1,width) "\n"; word = substr(word,width+1)
+        }
+        if (word=="") continue
+        if (line=="") line = word
+        else if (length(line)+1+length(word) <= width) line = line " " word
+        else { out = out line "\n"; line = word }
+      }
+      return out line
+    }
+    function csvq(s,   t) {                             # quote only when the field needs it
+      if (s ~ /["\n\t]/) { t=s; gsub(/"/,"\"\"",t); return "\"" t "\"" }
+      return s
+    }
+    BEGIN{ n=split(hdr,H,","); SEP=sprintf("\t") }
+    { R++; if (NF>n) n=NF; for(i=1;i<=n;i++) C[R,i]=$i }
+    END{
+      if (R==0) exit
+      for(i=1;i<=n;i++){ w[i]=length(H[i])
+        for(r=1;r<=R;r++) if(length(C[r,i])>w[i]) w[i]=length(C[r,i]) }
+      # chrome: gum spends "│ " + " " per column plus a closing "│"; the plain form indents 2 and
+      # puts 2 between columns.
+      chrome = (mode=="gum") ? 3*n+1 : 2+2*(n-1)
+      tot=chrome; for(i=1;i<=n;i++) tot+=w[i]
+      if (tot > avail) {
+        wc=1; for(i=2;i<=n;i++) if(w[i]>w[wc]) wc=i
+        others=chrome; for(i=1;i<=n;i++) if(i!=wc) others+=w[i]
+        target = avail - others
+        if (target < 16) target = 16                    # below this a wrap is unreadable anyway
+        if (target < w[wc]) {
+          for(r=1;r<=R;r++) C[r,wc] = wrap(C[r,wc], target)
+          w[wc]=length(H[wc])
+          for(r=1;r<=R;r++){ m=split(C[r,wc],L,"\n")
+            for(q=1;q<=m;q++) if(length(L[q])>w[wc]) w[wc]=length(L[q]) }
+        }
+      }
+      if (mode=="gum") {
+        for(r=1;r<=R;r++){ s=""
+          for(i=1;i<=n;i++) s = s (i>1 ? SEP : "") csvq(C[r,i])
+          print s }
+        exit
+      }
+      s=""; for(i=1;i<=n;i++) s=s sprintf("%-*s  ", w[i], H[i]); sub(/ +$/,"",s)
+      print "  " k s z
+      for(r=1;r<=R;r++){
+        maxl=1
+        for(i=1;i<=n;i++){ cnt[i]=split(C[r,i], part, "\n")
+          for(q=1;q<=cnt[i];q++) cell[i "," q]=part[q]
+          if(cnt[i]>maxl) maxl=cnt[i] }
+        for(q=1;q<=maxl;q++){ s=""
+          for(i=1;i<=n;i++) s = s sprintf("%-*s  ", w[i], (q<=cnt[i] ? cell[i "," q] : ""))
+          sub(/ +$/,"",s); print "  " s }
+      }
+    }'
+}
+
+# tl_spin "title" cmd args…  — a spinner while a slow thing runs (test suite, LLM adapter).
+# The caller MUST keep its own redirections INSIDE the command, e.g.
+#   tl_spin "running tests…" sh -c "cd '$wt' && { $cmd; } >'$out' 2>/dev/null"
+# gum spin swallows the command's output unless --show-output, and --show-output also merges stderr
+# into stdout — which would inject adapter chatter straight into a stream we parse. Keeping the
+# redirection inside the command means gum has nothing to show and nothing to merge.
+# Exit status propagates (tl-gate's `|| trc=$?` depends on it).
+tl_spin() {
+  local title="$1"; shift
+  if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+    gum spin --spinner dot --title "$title" -- "$@"
+  else
+    "$@"
+  fi
+}
+
+# tl_page <file> — show the owner something they are about to decide about.
+# Plain `cat` when not decorating, so captured output is byte-identical. Markdown gets rendered.
+# Paged ONLY when it would not fit: a pager over a six-line report is worse than no pager, and the
+# thing it fixes is real — tl-approve used to cat a long report and then print the prompt below it,
+# pushing the report you are judging off the top of the screen.
+tl_page() { # <file>
+  local f="$1" rows total
+  [ -f "$f" ] || return 0
+  if [ -z "${TL_DECORATE:-}" ]; then cat "$f"; return 0; fi
+  rows="$(tput lines 2>/dev/null || echo 24)"
+  total="$(wc -l < "$f" | tr -d ' ')"
+  if [ "$total" -le "$((rows - 6))" ]; then _tl_render "$f"; return 0; fi
+  LESS="${LESS:-R}" ; export LESS          # else a bare $PAGER=less shows the render's escape codes
+  if [ -n "${PAGER:-}" ]; then _tl_render "$f" | $PAGER
+  elif command -v gum >/dev/null 2>&1; then _tl_render "$f" | gum pager
+  else _tl_render "$f" | less -R 2>/dev/null || _tl_render "$f"
+  fi
+}
+_tl_render() {  # markdown through a renderer when we have one; anything else raw
+  case "$1" in
+    *.md)
+      command -v glow >/dev/null 2>&1 && { glow -s auto "$1" && return 0; }
+      command -v gum  >/dev/null 2>&1 && { gum format < "$1" && return 0; } ;;
+  esac
+  cat "$1"
+}
 
 # bump_hits <lead-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry
 # (1-indexed in file order — the same numbering the grill/review adapter shows the model). The reuse

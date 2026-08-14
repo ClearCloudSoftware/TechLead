@@ -9,6 +9,7 @@
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
 name="${1:-}"
+sdir="$(mktemp -d)"; trap 'rm -rf "$sdir"' EXIT
 [ -n "$name" ] || name="$(tl_current_project)" || tl_die "run from inside a project (or pass its name). Registered here: $(ls "$TL_DATA/projects" 2>/dev/null | sed 's/\.conf$//' | tr '\n' ' ')"
 path="$("$BIN/tl-project.sh" get "$name" path)" || tl_die "unknown project: $name (run from inside it, or tl-onboard/tl-new it first)"
 
@@ -22,10 +23,13 @@ wrote=""
 for doc in AGENTS.md CONTEXT.md; do
   target="$path/$doc"
   if [ -e "$target" ]; then tl_log "skip $doc — already exists (refusing to overwrite)"; continue; fi
-  tl_log "scaffold-context: drafting $doc for '$name' (calling scaffolder)…"
-  draft="$(TL_CTX_NAME="$name" TL_CTX_PROJECT="$path" TL_CTX_DOC="$doc" $scaffolder || true)"
-  if [ -z "$draft" ]; then tl_log "scaffolder produced nothing for $doc — draft it by hand"; continue; fi
-  printf '%s\n' "$draft" > "$target"; wrote="$wrote $doc"
+  # Via a file, not `$( )`: reading a whole repo takes a while, and tl_spin cannot show a command
+  # substitution (see its contract in tl-common.sh).
+  export TL_CTX_NAME="$name" TL_CTX_PROJECT="$path" TL_CTX_DOC="$doc"
+  tl_spin "scaffold-context: drafting $doc for '$name'…" \
+    sh -c "$scaffolder > '$sdir/draft'" || true
+  if [ ! -s "$sdir/draft" ]; then tl_log "scaffolder produced nothing for $doc — draft it by hand"; continue; fi
+  cp "$sdir/draft" "$target"; wrote="$wrote $doc"
 done
 
 [ -n "$wrote" ] || tl_die "nothing drafted (both docs exist, or the scaffolder produced nothing)"
@@ -33,3 +37,6 @@ echo "tl: drafted$wrote in $path."
 echo "tl: REVIEW them — the first CONTEXT.md especially is yours to check (§8.21). Then commit so the"
 echo "    grill/review/answer can read them (workers branch from HEAD):"
 echo "      git -C \"$path\" add$(printf ' %s' $wrote) && git -C \"$path\" commit -m 'add onboarding docs'"
+# "REVIEW them" used to mean "go open them yourself". Show them, rendered, when someone is watching;
+# captured output is untouched so test/scaffold-context-smoke.sh sees only its own lines.
+if [ -n "${TL_DECORATE:-}" ]; then for doc in $wrote; do tl_page "$path/$doc"; done; fi

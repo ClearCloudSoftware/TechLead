@@ -19,7 +19,12 @@ out="$dir/${type}-${key}.md"
 [ -f "$out" ] && { echo "tl: proposal already exists, skipping: ${out#"$TL_DATA"/}"; exit 0; }   # idempotent
 
 : "${TL_PROPOSE_CMD:?tl: no proposer — set TL_PROPOSE_CMD (e.g. adapters/claude-propose.sh)}"
-draft="$(TL_PROP_TYPE="$type" TL_PROP_KEY="$key" TL_PROP_CASE="$casef" $TL_PROPOSE_CMD || true)"
+# Via a file, not a command substitution: the spinner cannot show a `$( )` (see tl_spin).
+dtmp="$(mktemp)"
+export TL_PROP_TYPE="$type" TL_PROP_KEY="$key" TL_PROP_CASE="$casef"
+# ${type} braced: bash 3.2 folds the following multibyte "…" into the variable name otherwise.
+tl_spin "drafting a candidate ${type}…" sh -c "$TL_PROPOSE_CMD > '$dtmp'" || true
+draft="$(cat "$dtmp")"; rm -f "$dtmp"
 [ -n "$draft" ] || draft="_(proposer produced nothing — draft the ${type} by hand from the case below)_"
 
 {

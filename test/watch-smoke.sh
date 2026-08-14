@@ -9,6 +9,7 @@ fail() { echo "FAIL: $1"; exit 1; }
 PROJ="$(mktemp -d)"; git -C "$PROJ" init -q
 git -C "$PROJ" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 WORK="$(mktemp -d)"
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$REPO" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_WORKTREES="$WORK/state/wt"
 cleanup() { rm -rf "$PROJ" "$WORK"; }; trap cleanup EXIT
 

@@ -20,7 +20,16 @@ tl_ask() {  # KEY "prompt" "default" -> answer on stdout
 }
 
 tl_confirm() {  # KEY "prompt" "y|n default" -> exit 0 for yes
-  local a; a="$(tl_ask "$1" "$2 (y/n)" "$3")"
+  local key="$1" prompt="$2" def="$3" ov
+  eval "ov=\${TL_ANSWER_${key}:-}"
+  if [ -z "$ov" ] && ! tl_noninteractive && command -v gum >/dev/null 2>&1; then
+    # gum confirm's own exit status IS the answer (0 yes / 1 no), so pass it straight through.
+    # A cancel lands on "no", which is the conservative reading of every prompt that uses this.
+    case "$def" in y|Y|yes|YES|true|1) gum confirm --default   "$prompt";;
+                   *)                  gum confirm --default=false "$prompt";; esac
+    return $?
+  fi
+  local a; a="$(tl_ask "$key" "$prompt (y/n)" "$def")"
   case "$a" in y|Y|yes|YES|true|1) return 0;; *) return 1;; esac
 }
 
@@ -29,8 +38,13 @@ tl_choose() {  # KEY "prompt" default opt1 opt2 ... -> chosen on stdout (gum/fzf
   local ov; eval "ov=\${TL_ANSWER_${key}:-}"
   [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
   tl_noninteractive && { printf '%s\n' "$def"; return 0; }
-  if command -v gum >/dev/null 2>&1; then gum choose --selected="$def" "$@"; return 0; fi
-  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --select-1 --prompt="$prompt> "; return 0; fi
+  # --header carries the question: gum paints over the scrollback, so anything the caller echoed
+  # first can be gone by the time the picker is on screen.
+  # Cancel (esc / ctrl-c) returns non-zero and we propagate it — the caller's `set -e` aborts.
+  # Swallowing it would hand back an empty string, which reads as "took the default": a cancelled
+  # gate prompt would silently approve a finding.
+  if command -v gum >/dev/null 2>&1; then gum choose --header="$prompt" --selected="$def" "$@"; return $?; fi
+  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --select-1 --prompt="$prompt> "; return $?; fi
   local i=1 o pick                                   # plain fallback: numbered menu, empty -> default
   for o in "$@"; do printf '  %d) %s\n' "$i" "$o" >&2; i=$((i+1)); done
   printf 'tl: %s [%s]: ' "$prompt" "$def" >&2
@@ -39,4 +53,89 @@ tl_choose() {  # KEY "prompt" default opt1 opt2 ... -> chosen on stdout (gum/fzf
   case "$pick" in *[!0-9]*) printf '%s\n' "$pick"; return 0;; esac   # typed a literal value
   i=1; for o in "$@"; do [ "$i" = "$pick" ] && { printf '%s\n' "$o"; return 0; }; i=$((i+1)); done
   printf '%s\n' "$def"                               # out of range -> default
+}
+
+tl_filter() {  # "placeholder" -> one line, fuzzy-picked from the lines on stdin (empty if cancelled)
+  local prompt="$1"
+  if command -v gum >/dev/null 2>&1; then gum filter --placeholder "$prompt"; return $?; fi
+  if command -v fzf >/dev/null 2>&1; then fzf --prompt="$prompt> "; return $?; fi
+  local all pick                                     # plain fallback: list, then type it
+  all="$(cat)"; printf '%s\n' "$all" | sed 's/^/  /' >&2
+  printf 'tl: %s: ' "$prompt" >&2; IFS= read -r pick || pick=""
+  printf '%s\n' "$pick"
+}
+
+tl_pick_task() {  # -> a task id from state/*.meta. Non-zero if there is nobody to ask, or nothing to pick.
+  tl_noninteractive && return 1
+  local ids
+  ids="$(ls "$TL_STATE"/*.meta 2>/dev/null | sed 's#.*/##; s#\.meta$##')" || true
+  [ -n "$ids" ] || return 1
+  printf '%s\n' "$ids" | tl_filter "task id"
+}
+
+tl_pick_slug() {  # -> a backlog slug (the heading key, not the title)
+  tl_noninteractive && return 1
+  local b items
+  b="${TL_BACKLOG:-$TL_DATA/backlog.md}"
+  [ -f "$b" ] || return 1
+  # "## slug: title" -> "slug — title"; slugs never contain spaces, so the first field is the answer.
+  items="$(awk '/^## /{ s=$0; sub(/^## /,"",s); k=s; sub(/:.*/,"",k); t=s; sub(/^[^:]*: */,"",t);
+                        printf "%s — %s\n", k, t }' "$b")"
+  [ -n "$items" ] || return 1
+  printf '%s\n' "$items" | tl_filter "backlog item" | awk '{print $1}'
+}
+
+tl_ask_dir() {  # KEY "prompt" "default" -> a directory path (gum file --directory when present)
+  local key="$1" prompt="$2" def="$3" ov d
+  eval "ov=\${TL_ANSWER_${key}:-}"
+  [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
+  tl_noninteractive && { printf '%s\n' "$def"; return 0; }
+  if command -v gum >/dev/null 2>&1; then
+    d="$(gum file --directory --header="$prompt" "${def:-$PWD}")" || return $?
+    printf '%s\n' "${d:-$def}"; return 0
+  fi
+  tl_ask "$key" "$prompt" "$def"
+}
+
+tl_text() {  # KEY "prompt" "default" -> free text on stdout (gum input if present, else one line)
+  # `gum input`, NOT `gum write`: write is the multi-line textarea and submits on ctrl-d, which
+  # reads as a hung prompt to anyone who just pressed enter. input submits on enter like every other
+  # prompt here, and --value pre-fills an EDITABLE default — the `read -e -i` behaviour bash 3.2
+  # can't give us. Without gum the default is shown instead, and empty input keeps it.
+  local key="$1" prompt="$2" def="$3" ov ans
+  eval "ov=\${TL_ANSWER_${key}:-}"
+  [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
+  tl_noninteractive && { printf '%s\n' "$def"; return 0; }
+  if command -v gum >/dev/null 2>&1; then
+    # Cancel propagates (see tl_choose) rather than quietly demoting to the plain prompt below —
+    # falling through mid-question is how you end up staring at two different prompts for one answer.
+    ans="$(gum input --header="$prompt" --value="$def" --char-limit=0)" || return $?
+    printf '%s\n' "${ans:-$def}"; return 0
+  fi
+  printf 'tl: %s\n' "$prompt" >&2
+  [ -n "$def" ] && printf '    %s[enter keeps: %s]%s\n' "$TL_C_DIM" "$def" "$TL_C_0" >&2
+  printf '> ' >&2
+  IFS= read -r ans || ans=""
+  printf '%s\n' "${ans:-$def}"
+}
+
+tl_pick_many() {  # KEY "prompt" opt1 opt2 ... -> the KEPT options, one per line. Default: keep all.
+  # Multi-select is what "open the file and delete the lines you don't want" actually is.
+  # TL_ANSWER_<KEY> takes a semicolon-separated list of literal options.
+  local key="$1" prompt="$2"; shift 2
+  local ov; eval "ov=\${TL_ANSWER_${key}:-}"
+  [ -n "$ov" ] && { printf '%s\n' "$ov" | tr ';' '\n'; return 0; }
+  tl_noninteractive && { printf '%s\n' "$@"; return 0; }
+  if command -v gum >/dev/null 2>&1; then gum choose --no-limit --header="$prompt" "$@"; return $?; fi
+  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --multi --prompt="$prompt> "; return $?; fi
+  local i=1 o n pick                                 # plain fallback: numbered list, keep-by-number
+  for o in "$@"; do printf '  %s%d)%s %s\n' "$TL_C_KEY" "$i" "$TL_C_0" "$o" >&2; i=$((i+1)); done
+  printf 'tl: %s — numbers to KEEP, space-separated [all]: ' "$prompt" >&2
+  IFS= read -r pick || pick=""
+  [ -z "$pick" ] && { printf '%s\n' "$@"; return 0; }
+  for n in $pick; do
+    case "$n" in ''|*[!0-9]*) continue;; esac        # ignore junk rather than guess
+    [ "$n" -ge 1 ] && [ "$n" -le $# ] && printf '%s\n' "${!n}"
+  done
+  return 0
 }

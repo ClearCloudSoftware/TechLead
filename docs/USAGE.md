@@ -331,12 +331,24 @@ are deliberate:
 | `e` | edit the backlog item, or the spec | `$EDITOR` (at the item's line), full-screen |
 | `t` | retire a signed-off task | **confirm**, then `tl-teardown <id>` — releases its worktree; the report is kept |
 | `n` | jump to the next waiting item | in-TUI, instant |
-| `p` | read the deliverable — the plan report, or the worker's output when there isn't one | opens it in `$TL_MD_VIEWER` (else `$PAGER`, else `less`); returns on exit |
+| `p` | read the deliverable, **follow** a running worker, or peek a finished one | report → `$TL_MD_VIEWER`; running → `tl-peek --follow` (ctrl-c returns); otherwise `$PAGER` |
+| `H` | draft a test harness, so the project can graduate from `plan`-only | **confirm**, then `tl-scaffold-test <project>` — you review and commit it, then `tl-baseline` |
 | `g` | **grill** an un-grilled backlog item | **confirm**, then `tl-grill <slug>` — the questions land back in the inbox to answer; no worker is dispatched |
 | `g` | …or resolve the terminal gate on a dispatched task | **confirm**, then `tl-deliver <id>` for a `change` (its gate prompts approve/skip/fix per finding), or `tl-approve <id>` for a `plan` — mirroring `tl-run`'s own kind test |
 | `r` | run / resume the whole pipeline for the selected item | **confirm**, then `tl-run <slug>` in the normal terminal — this one *does* dispatch a worker |
 | `/` `:` | filter · command (view 3) | prompt |
 | `?` / `q` | keys · quit | — |
+
+**Why everything is a `plan`.** `tl-spawn` picks a task's kind from the project's readiness
+(§2.7): `survey` → `plan`, `ready`/`assisted` → `change`. A repo with no test harness has no
+completion criterion, so a worker is not allowed to change code. `tl-top` says so on screen when the
+project is at `survey`, and `H` starts the way out: `tl-scaffold-test` drafts a harness, you review
+and commit it, `tl-baseline` records the baseline and promotes the project to `ready`. From then on
+`r` dispatches a **change** worker that writes code.
+
+A running worker is a **row**, not a footnote — it carries how long it has been going and when its
+session last wrote, `p` follows its log live, and `r` lands you in `:fleet` on the task it just
+dispatched.
 
 A finished `plan` **is** its report, so the report shows in the inbox pane and in the briefing, and
 `p` opens it. Reports are markdown, so a plain pager shows them as source; point `TL_MD_VIEWER` at

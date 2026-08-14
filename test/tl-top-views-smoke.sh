@@ -98,6 +98,21 @@ EOF
     "$PROJ" "$TL_WORKTREES/tl-docs" "$(git -C "$PROJ" rev-parse HEAD)" "$TL_DATA/tl-docs/report.md" \
     > "$TL_STATE/tl-docs.meta"
 
+  # a project registered at readiness=survey — which is WHY every task spawns as a plan, and the
+  # thing the TUI has to say out loud rather than leave you guessing
+  mkdir -p "$TL_DATA/projects"
+  printf 'path=%s\nmode=local-only\ndefault_branch=main\nmax_files_changed=25\nreadiness=survey\n' \
+    "$PROJ" > "$TL_DATA/projects/notes.conf"
+
+  # a worker actually RUNNING: live session, fresh log, no status event -> tl-state says `working`
+  mkdir -p "$TL_STATE/sessions/tl-worker" "$TL_DATA/tl-worker"
+  sleep 120 &
+  KIDS="$KIDS $!"
+  echo "$!" > "$TL_STATE/sessions/tl-worker/pid"
+  printf 'reading src/notes.py\nediting src/config.py\nrunning test.sh\n' \
+    > "$TL_STATE/sessions/tl-worker/log"
+  printf 'kind=change\npname=notes-app\nbranch=tl/tl-worker\n' > "$TL_STATE/tl-worker.meta"
+
   printf '# questions.md\n\n### what breaks that already works?\nhits: 4   last: 2026-08-14\n_scar:_ the 2024 reindex silently dropped 11k rows\n' > "$TL_LEAD/questions.md"
 }
 
@@ -121,6 +136,9 @@ grep -q '^q: q3|open|' "$TL_DATA/tl-add-search/spec.md" \
 grep -q 'tl-add-search' "$TL_DATA/metrics.tsv" 2>/dev/null \
   || fail "S2: tl-grill's D13 metric did not fire — tl-top bypassed the command path"
 echo "  S2 ok — d answers through the real tl-grill, and the next question is answerable at once"
+
+setup; drive watch      || fail "scenario 'watch' (see above)"
+echo "  S6 ok — a running worker is a row you can watch, and survey readiness explains itself"
 
 setup; drive report     || fail "scenario 'report' (see above)"
 grep -q '^approval=approve' "$TL_STATE/tl-docs.meta" \

@@ -21,6 +21,7 @@ import select
 import struct
 import subprocess
 import sys
+import signal
 import termios
 import time
 
@@ -139,6 +140,27 @@ elif SCENARIO == "answer":
     expect("answer q3", "d must act immediately after an answer — the notice must not eat it",
            seed=send("d", 1.0))
     send("\x1b")                              # esc: leave q3 open, writing nothing
+
+elif SCENARIO == "watch":
+    # A dispatched task used to collapse into a one-line summary at the bottom — the one thing you
+    # were waiting on was the one thing you could not watch.
+    want(launch, "◐ working", "a running worker must be a row, not a footnote")
+    want(launch, "tl-worker", "...named")
+    want(launch, "last output", "...saying when it last made a sound")
+    # and the reason every task comes out as a `plan` has to be said, not left to be discovered
+    want(launch, "readiness: survey", "survey readiness must explain itself")
+    want(launch, "tl-scaffold-test", "...and point at the way out")
+
+    screen = send("/tl-worker\n")             # not /worker: that also matches "worker asks…"
+    want(screen, "tl-worker", "filter to the running task")
+    screen = send("p", 2.5)                   # follow its log rather than snapshot it
+    want(screen, "following", "p on a running worker must follow, not snapshot")
+    want(screen, "editing src/config.py", "...showing the session log")
+    # A literal ^C cannot be tested here: this pty has no controlling terminal (Popen does not
+    # setsid + TIOCSCTTY), so the kernel never turns the byte into SIGINT — it just echoes ^C.
+    # Signalling the process directly exercises the same handler the real ctrl-c reaches.
+    os.kill(proc.pid, signal.SIGINT)
+    expect("WHAT", "interrupting the follow must return to the TUI", seed=drain(2.0))
 
 elif SCENARIO == "report":
     # "plan report ready: approve, skip or fix" has to be actionable FROM HERE — the row was

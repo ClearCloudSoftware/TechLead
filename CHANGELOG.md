@@ -62,6 +62,14 @@ use (§4).
     records `delivered`, but neither changes `tl-state` — it keeps saying `done` — so the row went
     on asking "approve, skip or fix" after you had approved it. A signed-off task becomes a
     `retire` row, and **`t`** runs `tl-teardown` to release its worktree (the report is kept).
+  - **A running worker is a row**, not a one-line footnote at the bottom: the task you just
+    dispatched was the one thing you could not watch. It carries elapsed time and when its session
+    last wrote, **`p` follows its log** (`tl-peek --follow`, new), and `r` lands you in `:fleet` on
+    the task it dispatched.
+  - **Survey readiness explains itself.** `tl-spawn` picks a task's kind from the project's
+    readiness (§2.7: `survey` → `plan`), so on a repo with no test harness every task comes out a
+    plan and nothing said why. The inbox now says so, and **`H`** runs `tl-scaffold-test` to start
+    the way out (you review and commit it; `tl-baseline` promotes the project).
   - `/` starts a **fresh** filter instead of being seeded with the current one, so `/` then enter
     clears it and a new term replaces rather than concatenates.
 - **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader
@@ -129,6 +137,10 @@ nothing crosses into deciding what "correct" means without a human.
   never strips (`test/scrub-smoke.sh`).
 
 ### Fixed
+
+- **The screen was not fully repainted after a shelled command.** `_suspend` refreshed, but curses
+  still believed the terminal held what *it* last drew, so only cells differing from that stale
+  model were re-emitted — leaving the command's output showing through. It now `redrawwin()`s.
 
 - **`tl-grill` failed OPEN when its driver died.** The driver ran on the left of a pipe, so the
   pipeline's status was the read loop's — always 0. A driver that could not start (no API key, bad

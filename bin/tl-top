@@ -136,6 +136,17 @@ def read_report(path, limit=200):
         return []
 
 
+def _run_detail(r, now=None):
+    """What a running worker's row says: how long, and when it last made a sound. Cooperative
+    signals say what it is doing; OS activity says whether it is alive at all (§3.5)."""
+    now = time.time() if now is None else now
+    bits = [age(now - r.started) if r.started else r.state]
+    bits.append("last output %s ago" % age(now - r.active) if r.active else "no output yet")
+    if _base_state(r.state) != "working":
+        bits.insert(0, r.state)
+    return " · ".join(bits)
+
+
 def _mtime(path):
     try:
         return os.path.getmtime(path)
@@ -290,8 +301,9 @@ _QRANK = {
     "failed": 4,
     "review": 5,        # deliverable ready
     "ready": 6,         # specified, never dispatched
-    "backlog": 7,       # never grilled
-    "retire": 8,        # finished and signed off — teardown is bookkeeping, but it frees a worktree
+    "working": 7,       # a worker is running — nothing is needed from you, but you want to watch it
+    "backlog": 8,       # never grilled
+    "retire": 9,        # finished and signed off — teardown is bookkeeping, but it frees a worktree
 }
 
 
@@ -406,7 +418,11 @@ def build_queue_model(state_dir, data_dir, state_of, backlog_items):
                                    detail="%s report ready: approve, skip or fix" % r.kind,
                                    **common))
         else:
-            q.quiet.append(r)     # working / paused — nothing needed, so it recedes to one line
+            # working / paused. Nothing is needed from you, so it ranks near the bottom — but it
+            # stays a ROW: collapsing the task you just dispatched into a one-line summary meant
+            # the thing you were waiting on was the one thing you could not watch.
+            q.quiet.append(r)     # kept for `:fleet`, which lists the live fleet
+            q.rows.append(QRow("working", r.id, qid="", detail=_run_detail(r), **common))
 
     q.rows.sort(key=lambda r: (r.rank, r.task, qid_key(r.qid)))
     return q
@@ -547,14 +563,27 @@ def _selftest():
                     ("question", "tl-open", "q7"), ("question", "tl-open", "q10"),
                     ("decision", "tl-b", ""),
                     ("failed", "tl-e", ""), ("review", "tl-f", ""),
-                    ("ready", "tl-ready", ""), ("backlog", "fresh", ""),
-                    ("retire", "tl-signed", "")],
+                    ("ready", "tl-ready", ""),
+                    ("working", "tl-c", ""), ("working", "tl-g", ""),
+                    ("working", "tl-h", ""), ("working", "tl-i", ""),
+                    ("backlog", "fresh", ""), ("retire", "tl-signed", "")],
           "queue order wrong: %r" % (whats,))
     dec = [r for r in q.rows if r.what == "decision"]
     check(len(dec) == 1 and dec[0].detail == "worker asks: reuse the retry helper?",
           "needs-decision row should quote data/<id>/ask: %r" % [r.detail for r in dec])
     check(sorted(r.id for r in q.quiet) == ["tl-c", "tl-g", "tl-h", "tl-i"],
-          "working/paused/unknown recede into quiet: %r" % [r.id for r in q.quiet])
+          "working/paused/unknown stay in `quiet` for :fleet: %r" % [r.id for r in q.quiet])
+    # ...and ALSO get a row, so the task you just dispatched is watchable rather than collapsed
+    # into a one-line summary at the bottom of the screen
+    wrk = {r.task: r for r in q.rows if r.what == "working"}
+    check(set(wrk) == {"tl-c", "tl-g", "tl-h", "tl-i"},
+          "every live task must have a row: %r" % sorted(wrk))
+    check("last output" in wrk["tl-c"].detail or "no output yet" in wrk["tl-c"].detail,
+          "a running row must say when it last made a sound: %r" % wrk["tl-c"].detail)
+    check(wrk["tl-g"].detail.startswith("paused"),
+          "a paused row must lead with why it is not working: %r" % wrk["tl-g"].detail)
+    check(_run_detail(by["tl-c"], now=by["tl-c"].started + 4000).startswith("1h"),
+          "elapsed is rendered compactly: %r" % _run_detail(by["tl-c"], now=by["tl-c"].started + 4000))
     check(len({r.key for r in q.rows}) == len(q.rows), "row keys must be unique (the cursor uses them)")
 
     items = {i[0]: i for i in q.items}
@@ -764,6 +793,30 @@ def tl_backlog_show(slug):
         return 0, "", ""
 
 
+def current_project():
+    """The sole project registered in this instance — mirrors tl_current_project (one per repo now).
+    Returns "" when zero or several are registered, since then there is nothing unambiguous to say."""
+    confs = sorted(glob.glob(os.path.join(_state_paths()[1], "projects", "*.conf")))
+    return os.path.basename(confs[0])[:-len(".conf")] if len(confs) == 1 else ""
+
+
+def _readiness_note():
+    """Why every task is coming out as a `plan`, said where you would otherwise wonder.
+
+    tl-spawn picks the kind from the project's readiness (§2.7): survey -> plan, ready -> change.
+    A repo with no test harness has no completion criterion, so a worker is not allowed to change
+    code — but nothing said so, which reads as the tool refusing to implement anything."""
+    name = current_project()
+    if not name:
+        return []
+    r = _run_capture([os.path.join(BIN, "tl-project.sh"), "get", name, "readiness"]).strip()
+    if r != "survey":
+        return []
+    return ["── %s · readiness: survey — every task spawns as a `plan` " % name + "─" * 30,
+            "no test harness, so a worker has no way to tell whether it broke something."
+            "   H drafts one (tl-scaffold-test)"]
+
+
 def read_bank(path):
     """lead/questions.md -> [(question, hits, scar)]. The bank is the asset (§2.6), so `3 bank`
     shows it with its hit counts; the file's shape is lead/SHAPE.md's."""
@@ -796,7 +849,7 @@ CP_LOUD, CP_STUCK, CP_READY, CP_QUIET = 1, 2, 3, 4
 _WHAT_ATTR = {
     "gate": "loud", "question": "loud", "decision": "loud",
     "blocked": "stuck", "failed": "stuck",
-    "review": "ready", "ready": "ready", "retire": "quiet",
+    "review": "ready", "ready": "ready", "retire": "quiet", "working": "quiet",
     "backlog": "stuck",
 }
 _ANSWER_KEYS = {ord("d"): "decided", ord("l"): "leaning", ord("s"): "spike"}
@@ -882,7 +935,7 @@ def inbox_lines(rows, w):
     head_w = 12 + task_w        # "● " + what(8) + " " + task(task_w) + " "
     out = []
     for i, r in enumerate(rows):
-        mark = "○" if r.what == "backlog" else "●"
+        mark = {"backlog": "○", "working": "◐", "retire": "✓"}.get(r.what, "●")
         head = "%s %-8s %-*s " % (mark, r.what[:8], task_w, (r.task or r.slug)[:task_w])
         for j, ln in enumerate(_wrap(r.detail, max(8, w - head_w - 1))):
             out.append((i, (head if j == 0 else " " * head_w) + ln))
@@ -891,6 +944,7 @@ def inbox_lines(rows, w):
 
 def _draw_inbox(win, st, q, data_dir):
     h, w = win.getmaxyx()
+    readiness_note = _readiness_note()
     rows = _filtered(q.rows, st["filter"])
     _bar(win, 0, " " + _tabs(1),
          "%d waiting · %d working " % (len(q.rows), len(q.quiet)))
@@ -920,12 +974,9 @@ def _draw_inbox(win, st, q, data_dir):
 
     y = 2 + drawn + 1
     y = _draw_detail(win, rows[sel], y, h - 2, data_dir)
-    if q.quiet and y < h - 2:
-        now = time.time()
-        names = " · ".join("%s %s" % (r.id, age(now - r.started) if r.started else r.state)
-                           for r in q.quiet[:4])
-        _addln(win, h - 2, 0, "working: %d — %s   (3 modal → :fleet to watch)"
-               % (len(q.quiet), names), _bucket_attr("quiet"))
+    if readiness_note and y < h - 2:
+        for i, ln in enumerate(readiness_note[-2:]):
+            _addln(win, h - 3 + i, 0, ln, _bucket_attr("stuck", bold=False))
     _foot_inbox(win, st, q, rows[sel])
 
 
@@ -946,6 +997,8 @@ def _foot_inbox(win, st, q, row=None):
         keys = " p read the report   g approve/deliver   e edit   r run   / filter"
     elif row is not None and row.what == "retire":
         keys = " t retire (frees the worktree)   p read the report   / filter"
+    elif row is not None and row.what == "working":
+        keys = " p follow its log   3 fleet   e edit   / filter"
     else:
         keys = " r run   g gate   p peek   e edit   / filter"
     _bar(win, h - 1, keys, "? help   q quit ")
@@ -1105,6 +1158,8 @@ def _draw_briefing(win, st, q, data_dir):
              "n next   q quit ")
     elif r.what == "retire":
         _bar(win, h - 1, " t retire (frees the worktree)   p read the report", "n next   q quit ")
+    elif r.what == "working":
+        _bar(win, h - 1, " p follow its log (tail -f)   3 fleet   e edit", "n next   q quit ")
     else:
         _bar(win, h - 1, " r run   g gate   p peek   e edit   x reject", "n next   q quit ")
 
@@ -1323,8 +1378,14 @@ def _suspend(win, fn):
     curses.endwin()
     try:
         fn()
+    except KeyboardInterrupt:
+        pass                      # ctrl-c is how you leave a follow; it is not an error
     finally:
         curses.reset_prog_mode()
+        # redrawwin, not just refresh: the shelled command wrote all over the terminal, but curses
+        # still believes the screen holds what IT last drew, so a plain refresh re-emits only the
+        # cells that differ from that stale model — leaving the command's output showing through.
+        win.redrawwin()
         win.refresh()
 
 
@@ -1386,6 +1447,21 @@ def _page_file(win, path):
                 input("\n[enter to return] ")
             except EOFError:
                 pass
+    _suspend(win, go)
+
+
+def _follow(win, tid):
+    """tail -f the worker's session log until you interrupt — `p` on a running task used to show a
+    frozen snapshot, so watching meant pressing it again and again."""
+    if not _ID_RE.match(tid):
+        return
+
+    def go():
+        print("── following %s — ctrl-c to return ──" % tid)
+        try:
+            subprocess.call([os.path.join(BIN, "tl-peek.sh"), tid, "200", "--follow"])
+        except KeyboardInterrupt:
+            pass                                   # ctrl-c is how you leave; it is not an error
     _suspend(win, go)
 
 
@@ -1502,7 +1578,8 @@ def _help(win):
         "  r                 run / resume the pipeline         → tl-run   (confirm)",
         "  g                 grill an un-grilled backlog item  → tl-grill  (confirm)",
         "                    …or resolve the delivery gate     → tl-deliver (confirm)",
-        "  p                 read the report, or peek output  → $PAGER",
+        "  p                 read the report · follow a running worker · peek",
+        "  H                 draft a test harness              → tl-scaffold-test (confirm)",
         "  / :               filter · command (view 3)",
         "  ? q               this help · quit",
         "",
@@ -1718,6 +1795,17 @@ def _loop(win):
             path, line = _target_path(target, data_dir)
             _edit_file(win, path, line)
             q = recompute()
+        elif ch == ord("H"):
+            name = current_project()
+            if not name:
+                st["notice"] = "no single registered project here — run tl-scaffold-test by hand"
+            elif _confirm(win, "Draft a test harness: tl-scaffold-test %s  (you review + commit it, "
+                               "then tl-baseline promotes the project to `ready`)" % name):
+                argv = [os.path.join(BIN, "tl-scaffold-test.sh"), name]
+                st["notice"] = _ran(argv, _shell_out(win, argv),
+                                    "drafted a harness — review it, commit it, then: tl-baseline %s"
+                                    % name)
+            q = recompute()
         elif ch == ord("t") and target and target.task.startswith("tl-"):
             if _confirm(win, "Retire: tl-teardown %s  (releases its worktree; the report is kept)"
                         % target.task):
@@ -1727,7 +1815,9 @@ def _loop(win):
             q = recompute()
         elif ch == ord("p") and target and target.task.startswith("tl-"):
             row = next((r for r in q.rows if r.task == target.task and r.fleet), None)
-            if row and row.fleet.report and os.path.isfile(row.fleet.report):
+            if row and row.what == "working":
+                _follow(win, target.task)              # watch it work, rather than snapshot it
+            elif row and row.fleet.report and os.path.isfile(row.fleet.report):
                 _page_file(win, row.fleet.report)      # the deliverable beats the session tail
             else:
                 _peek_fullscreen(win, target.task)
@@ -1735,7 +1825,16 @@ def _loop(win):
             slug = target.slug or (target.task[3:] if target.task.startswith("tl-") else target.task)
             if _confirm(win, "Run pipeline: tl-run %s  (its own approve/reject prompts)" % slug):
                 argv = [os.path.join(BIN, "tl-run.sh"), slug]
-                st["notice"] = _ran(argv, _shell_out(win, argv),
+                rc = _shell_out(win, argv)
+                q = recompute()
+                started = next((r for r in q.rows if r.what == "working" and r.slug == slug), None)
+                if rc == 0 and started:
+                    # it dispatched a worker — land in :fleet on it, which is where you watch
+                    st["view"], st["modal"], st["msel"] = 3, ("fleet", ""), 0
+                    st["cursor"] = started.key
+                    st["msel"] = _msel_for(st, q, data_dir, started)
+                st["notice"] = _ran(argv, rc, "dispatched '%s' — following it here; p tails its log"
+                                    % slug if started else
                                     "tl-run '%s' finished — the list shows where it stopped" % slug)
             q = recompute()
         elif ch == ord("g") and target:

@@ -16,6 +16,13 @@ path="$("$BIN/tl-project.sh" get "$name" path)" || tl_die "unknown project: $nam
 target="$path/CONTEXT.md"
 if [ -e "$target" ]; then tl_die "$target already exists — edit it by hand (refusing to overwrite)"; fi
 
+# stdin must be piped content, not a terminal — otherwise `cat` blocks silently and looks hung. The
+# interview isn't this command's job (it runs in the techlead skill's chat); this only persists.
+if [ -t 0 ]; then
+  tl_die "nothing piped in. tl-kickoff persists a composed CONTEXT.md from stdin — it does NOT run the
+  interview. Ideate via the techlead skill (in chat), or persist by hand:
+      printf '# CONTEXT.md\\n...\\n' | tl-kickoff${1:+ }${1:-}"
+fi
 content="$(cat)"   # the composed CONTEXT.md, piped in from the ideation
 [ -n "$content" ] || tl_die "no CONTEXT.md content on stdin — compose it from the ideation, then pipe it in"
 printf '%s\n' "$content" > "$target"

@@ -13,11 +13,15 @@ TAB="$(printf '\t')"
 slugify() { printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//'; }
 
 _finalize() {  # id — set state from open-count, then report
-  local id="$1" open
+  local id="$1" open total
   open="$("$BIN/tl-spec.sh" open-count "$id")"
+  total="$("$BIN/tl-spec.sh" qlist "$id" | awk 'END{print NR}')"
   if [ "$open" -eq 0 ]; then "$BIN/tl-spec.sh" set "$id" state specified
   else "$BIN/tl-spec.sh" set "$id" state drafted; fi
   echo "tl: $id — state=$("$BIN/tl-spec.sh" get "$id" state), $open open question(s)"
+  # An empty bank yields 0 questions; tl-run then refuses to dispatch (fail closed, #49). Say so here
+  # so a bare `tl-grill` run doesn't look like a clean pass when nothing was actually asked.
+  [ "$total" -eq 0 ] && echo "tl: ⚠ no questions produced — $TL_LEAD/questions.md is empty (#49); the grill had nothing to ask." || true
   "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '{printf "  [%s] %-8s %-8s %s\n",$1,$2,$3,$5}'
   [ "$open" -gt 0 ] && echo "tl: answer the delta:  tl-grill answer $id <qid> <decided|leaning|spike> [text]" || true
 }

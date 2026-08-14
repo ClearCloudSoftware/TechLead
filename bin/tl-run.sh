@@ -20,19 +20,28 @@ slug="${1:?usage: tl-run [resume] <backlog-slug>}"
 id="tl-$(slugify "$slug")"
 count_q() { "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v k="$1" '$3==k{c++} END{print c+0}'; }
 
-# ---- stage: grill (create the spec if it does not exist yet, or resume an interrupted pass) ----
-# Resumability: re-grill not only when the spec is absent, but also when it exists yet the grill
-# never finalized — a `drafted` spec with 0 open questions. _finalize sets `specified` (0 open) or
-# `drafted` *with* the open deltas (open > 0), so "drafted AND 0 open" can only mean the driver died
-# before _finalize (e.g. TL_GRILL_CMD unset on the first run). Without this, that wedges tl-run: the
-# spec file exists so the grill is skipped forever, breaking the "just re-run tl-run" promise.
+# ---- stage: grill (create the spec if absent, or (re)run it whenever it holds no grilled questions) ----
+# Re-grill whenever the spec records zero questions and was not rejected. That one condition covers
+# BOTH an interrupted first pass (driver died before _finalize) AND a re-run after the owner finally
+# seeds lead/questions.md — in both cases the item still needs grilling. A grill that produced real
+# questions is left alone. Keeps the "just re-run tl-run" promise without a per-cause special case.
 spec="$("$BIN/tl-spec.sh" path "$id")"
-regrill=0
-if [ ! -f "$spec" ]; then regrill=1
-elif [ "$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)" = drafted ] \
-  && [ "$("$BIN/tl-spec.sh" open-count "$id" 2>/dev/null || echo 0)" -eq 0 ]; then regrill=1
+total_q() { "$BIN/tl-spec.sh" qlist "$id" 2>/dev/null | awk 'END{print NR}'; }
+state="$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)"
+if [ ! -f "$spec" ] || { [ "$state" != rejected ] && [ "$(total_q)" -eq 0 ]; }; then
+  tl_log "run[$id]: grill"; "$BIN/tl-grill.sh" "$slug"
+  state="$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)"
 fi
-if [ "$regrill" -eq 1 ]; then tl_log "run[$id]: grill"; "$BIN/tl-grill.sh" "$slug"; fi
+
+# ---- GUARD: never dispatch un-grilled work (fail closed, §3.9). Zero questions means the grill had
+# nothing to ask — an empty question bank (lead/questions.md, #49). The whole point of TechLead is the
+# judgment gate; silently briefing+spawning an item nobody grilled skips it. Refuse at the chokepoint.
+if [ "$state" != rejected ] && [ "$(total_q)" -eq 0 ]; then
+  echo "tl-run: STOP — '$id' has no grilled questions; refusing to dispatch un-grilled work."
+  echo "  cause: $TL_LEAD/questions.md is empty (#49) — the grill applies your question bank, and there isn't one yet."
+  echo "  fix:   add the questions to ask (one '## qN: <question>' per line) to that file, then re-run: tl-run $slug"
+  exit 0
+fi
 
 # ---- STOP 1: spec approval / reject (owner judgment — never auto-answered) ----
 state="$("$BIN/tl-spec.sh" get "$id" state 2>/dev/null || echo unknown)"

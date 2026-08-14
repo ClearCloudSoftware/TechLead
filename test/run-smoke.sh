@@ -100,6 +100,8 @@ Persist tasks; list with a 1-based index.
 ## bad-idea: Rewrite it in assembly for speed
 
 ## resume-me: An item whose first grill was interrupted
+
+## empty-bank: An item grilled against an empty question bank
 EOF
 
 echo "== B1: tl-run STOPS at an open spec, dispatching nothing =="
@@ -169,5 +171,14 @@ grep -q "grill" /tmp/rs-b6.log || fail "B6: tl-run did not re-grill the interrup
 [ "$("$BIN/tl-spec.sh" open-count tl-resume-me)" -gt 0 ] || fail "B6: expected the re-grill to surface the owner's open question"
 [ ! -f "$TL_STATE/tl-resume-me.meta" ] || fail "B6: dispatched despite a fresh open question"
 echo "  B6 ok — interrupted grill re-ran on tl-run; no longer wedged, halted at the new open question"
+
+echo "== B7: an empty question bank (grill yields 0 questions) → tl-run REFUSES to dispatch (fail closed) =="
+# Simulate an empty lead/questions.md by pointing the grill at a driver that emits nothing. The grill
+# runs but produces 0 questions; tl-run must refuse rather than brief+spawn an un-grilled item.
+TL_GRILL_CMD=/usr/bin/true "$BIN/tl-run.sh" empty-bank >/tmp/rs-b7.log 2>&1 || true
+grep -q "no grilled questions" /tmp/rs-b7.log || fail "B7: tl-run did not refuse the un-grilled item: $(cat /tmp/rs-b7.log)"
+[ ! -f "$TL_STATE/tl-empty-bank.meta" ]   || fail "B7: dispatched an un-grilled item"
+[ ! -f "$TL_DATA/tl-empty-bank/brief.md" ] || fail "B7: briefed an un-grilled item"
+echo "  B7 ok — 0-question grill refused at the chokepoint; nothing briefed or dispatched"
 
 echo "PASS: tl-spawn resolves + refuses by name; tl-run stops at spec & gate, hands off, and is resumable"

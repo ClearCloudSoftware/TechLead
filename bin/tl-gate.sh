@@ -16,8 +16,13 @@ pget() { "$BIN/tl-project.sh" get "$pname" "$1" 2>/dev/null || true; }
 cmd="$(pget test_command)"; baseline="$(pget baseline)"; danger="$(pget danger_paths)"; maxf="$(pget max_files_changed)"
 [ -n "$baseline" ] && [ -f "$baseline" ] || baseline=/dev/null
 
-# 1. tests vs baseline — new failures are regressions (§2.7)
-curfail="$(mktemp)"; ( cd "$wt" && eval "${cmd:-true}" ) 2>/dev/null | sort -u > "$curfail" || true
+# 1. tests vs baseline — new failures are regressions (§2.7). Capture the test command's OWN exit
+# status: a pipe (`eval … | sort`) masks it, so a harness that cannot run — missing file, broken
+# runner — otherwise reads as "0 failures" and merges anything (fail OPEN). A worker's worktree
+# branches from HEAD, so an uncommitted harness is exactly this case (see tl_warn_uncommitted).
+curfail="$(mktemp)"; rawout="$(mktemp)"; trc=0
+if [ -n "$cmd" ]; then ( cd "$wt" && eval "$cmd" ) >"$rawout" 2>/dev/null || trc=$?; fi
+sort -u "$rawout" > "$curfail"
 regressions="$(comm -13 "$baseline" "$curfail" 2>/dev/null || true)"
 
 # 2. scope + danger over the changed set
@@ -27,6 +32,12 @@ nfiles="$(printf '%s\n' "$changed" | grep -c . || true)"
 # 3. collect findings as rule<TAB>detail<TAB>path (path empty where the finding has no single file)
 tmp="$(mktemp)"; : > "$tmp"
 for t in $regressions; do [ -n "$t" ] && printf 'test-regression\tnewly failing: %s\t\n' "$t" >> "$tmp"; done
+# fail closed on an unrunnable harness: test_command is set but exited non-zero AND produced nothing.
+# A well-behaved harness prints failing-ids to stdout and exits 0; "errored with no output" means we
+# could not actually check for regressions, so we must NOT treat it as clean.
+if [ -n "$cmd" ] && [ "$trc" -ne 0 ] && [ ! -s "$rawout" ]; then
+  printf 'test-harness-unrunnable\ttest_command exited %s with no output in the worktree — harness missing or broken (workers branch from HEAD; commit the harness)\t\n' "$trc" >> "$tmp"
+fi
 if [ -n "$maxf" ] && [ "${nfiles:-0}" -gt "$maxf" ]; then
   printf 'scope-cap-exceeded\t%s files changed > max %s\t\n' "$nfiles" "$maxf" >> "$tmp"; fi
 set -f   # danger_paths are case-patterns; never pathname-expand them against the CWD (a real secret/ dir would break detection)
@@ -59,7 +70,7 @@ jq -R -s -c 'split("\n")|map(select(length>0)|split("\t"))|to_entries
   |map({id:("f"+((.key+1)|tostring)), class:.value[3], class_source:.value[4],
         rule:.value[0], path:(.value[2]|select(.!="")//null), line:null,
         detail:.value[1], resolved:null})' "$tmp2" > "$findings"
-rm -f "$curfail" "$tmp" "$tmp2"
+rm -f "$curfail" "$rawout" "$tmp" "$tmp2"
 
 count="$(jq 'length' "$findings")"
 echo "tl: gate for $id — $nfiles file(s) changed, $count finding(s)"

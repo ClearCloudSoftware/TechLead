@@ -50,6 +50,11 @@ class Row:
     started: float = 0.0
     active: float = 0.0
     report: str = ""    # the deliverable itself — what "approve, skip or fix" is ABOUT
+    # How a finished task is finished. tl-approve records `approval` (plan) and tl-deliver records
+    # `delivered` (change); neither changes tl-state, which keeps reporting `done`. Without reading
+    # them the row goes on asking to be approved after you have approved it.
+    approval: str = ""
+    delivered: str = ""
 
 
 # Visual/sort priority: lower = louder. Unresolved gate findings are the single most important
@@ -177,6 +182,8 @@ def build_fleet_model(state_dir, data_dir, state_of):
             started=_mtime(path),
             active=_mtime(os.path.join(state_dir, "sessions", tid, "log")),
             report=meta.get("report", ""),
+            approval=meta.get("approval", ""),
+            delivered=meta.get("delivered", ""),
         ))
     rows.sort(key=lambda r: (r.rank, r.id))
     return rows
@@ -284,6 +291,7 @@ _QRANK = {
     "review": 5,        # deliverable ready
     "ready": 6,         # specified, never dispatched
     "backlog": 7,       # never grilled
+    "retire": 8,        # finished and signed off — teardown is bookkeeping, but it frees a worktree
 }
 
 
@@ -386,8 +394,17 @@ def build_queue_model(state_dir, data_dir, state_of, backlog_items):
         elif base in ("blocked", "failed"):
             q.rows.append(QRow(base, r.id, qid="", detail=r.state, **common))
         elif base == "done":
-            q.rows.append(QRow("review", r.id, qid="",
-                               detail="%s report ready: approve, skip or fix" % r.kind, **common))
+            signed = r.approval or r.delivered
+            if signed:
+                # already signed off: it is finished, and what is left is releasing its worktree.
+                # Saying "approve, skip or fix" here is the system asking for a decision you made.
+                q.rows.append(QRow("retire", r.id, qid="",
+                                   detail="%s — t to retire it and free its worktree" % signed,
+                                   **common))
+            else:
+                q.rows.append(QRow("review", r.id, qid="",
+                                   detail="%s report ready: approve, skip or fix" % r.kind,
+                                   **common))
         else:
             q.quiet.append(r)     # working / paused — nothing needed, so it recedes to one line
 
@@ -409,12 +426,14 @@ def _selftest():
     os.makedirs(data_dir)
     metas = {
         "tl-a": ("kind=change\npname=proj1\nproject=/x/proj1\nstate=working\n"
-                 "branch=tl/tl-a\nworktree=/x/proj1/.techlead/state/wt/tl-a\nbase=9f2a1c4d\n"),
+                 "branch=tl/tl-a\nworktree=/x/proj1/.techlead/state/wt/tl-a\nbase=9f2a1c4d\n"
+                 "approval=approve\n"),
         "tl-b": "kind=plan\npname=proj1\nstate=working\n",
         "tl-c": "kind=change\npname=proj2\nstate=working\n",
         "tl-d": "kind=plan\npname=proj1\nstate=done\n",   # torn down -> excluded
         "tl-e": "kind=change\npname=proj2\nstate=working\n",
         "tl-f": "kind=plan\npname=proj1\nstate=working\n",
+        "tl-signed": "kind=plan\npname=proj1\nstate=working\napproval=approve\n",
         "tl-g": "kind=change\npname=proj3\nstate=working\n",
         "tl-h": "kind=plan\npname=proj3\nstate=working\n",
         "tl-i": "kind=answer\npname=proj3\nstate=working\n",
@@ -431,13 +450,13 @@ def _selftest():
         ], f)
 
     runtime = {"tl-a": "done", "tl-b": "needs-decision", "tl-c": "working",
-               "tl-e": "failed", "tl-f": "done", "tl-g": "paused",
+               "tl-e": "failed", "tl-f": "done", "tl-g": "paused", "tl-signed": "done",
                "tl-h": "paused:owner-review", "tl-i": "unknown"}
     state_of = lambda i: runtime.get(i, "unknown")
     model = build_fleet_model(state_dir, data_dir, state_of)
 
     ids = [r.id for r in model]
-    check(ids == ["tl-a", "tl-b", "tl-e", "tl-f", "tl-g", "tl-h", "tl-c", "tl-i"],
+    check(ids == ["tl-a", "tl-b", "tl-e", "tl-f", "tl-signed", "tl-g", "tl-h", "tl-c", "tl-i"],
           "priority order / torn-down exclusion wrong: %r" % ids)
     by = {r.id: r for r in model}
     if by.get("tl-a"):
@@ -462,6 +481,8 @@ def _selftest():
     check(bool(by.get("tl-b")) and by["tl-b"].waiting_on == "decision", "needs-decision -> 'decision'")
     check(bool(by.get("tl-e")) and by["tl-e"].waiting_on == "failed", "failed -> 'failed'")
     check(bool(by.get("tl-f")) and by["tl-f"].waiting_on == "review", "done -> 'review'")
+    check(by["tl-f"].approval == "" and by["tl-a"].approval == "approve",
+          "the row must carry the sign-off tl-approve/tl-deliver recorded")
     check(bool(by.get("tl-c")) and by["tl-c"].waiting_on == "", "working -> quiet ('')")
     check(bool(by.get("tl-g")) and by["tl-g"].waiting_on == "paused" and by["tl-g"].rank == 5,
           "paused recedes (rank 5)")
@@ -511,6 +532,13 @@ def _selftest():
           "qid_key: numeric within a prefix, and it must not choke on '' or the qi<n> form")
     check(("ready", "tl-ready", "") in whats, "fully-answered + undispatched -> a ready row")
     check(("backlog", "fresh", "") in whats, "un-grilled backlog item -> a backlog row")
+    # the reported bug: approving a plan changed nothing, so the row went on asking for approval
+    sgn = [r for r in q.rows if r.task == "tl-signed"]
+    check(len(sgn) == 1 and sgn[0].what == "retire" and "approve" in sgn[0].detail,
+          "an APPROVED plan must stop asking to be approved: %r"
+          % [(r.what, r.detail) for r in sgn])
+    check("approve, skip or fix" not in sgn[0].detail,
+          "...and must not repeat the decision you already made")
     check(not [w for w in whats if w[1] == "tl-nope"], "a rejected item must produce no row")
     # The order is the design, so it is spelled out rather than derived from _QRANK — the two
     # decisions TechLead exists to slow down (gate findings, grill questions) sit above everything,
@@ -519,7 +547,8 @@ def _selftest():
                     ("question", "tl-open", "q7"), ("question", "tl-open", "q10"),
                     ("decision", "tl-b", ""),
                     ("failed", "tl-e", ""), ("review", "tl-f", ""),
-                    ("ready", "tl-ready", ""), ("backlog", "fresh", "")],
+                    ("ready", "tl-ready", ""), ("backlog", "fresh", ""),
+                    ("retire", "tl-signed", "")],
           "queue order wrong: %r" % (whats,))
     dec = [r for r in q.rows if r.what == "decision"]
     check(len(dec) == 1 and dec[0].detail == "worker asks: reuse the retry helper?",
@@ -767,7 +796,7 @@ CP_LOUD, CP_STUCK, CP_READY, CP_QUIET = 1, 2, 3, 4
 _WHAT_ATTR = {
     "gate": "loud", "question": "loud", "decision": "loud",
     "blocked": "stuck", "failed": "stuck",
-    "review": "ready", "ready": "ready",
+    "review": "ready", "ready": "ready", "retire": "quiet",
     "backlog": "stuck",
 }
 _ANSWER_KEYS = {ord("d"): "decided", ord("l"): "leaning", ord("s"): "spike"}
@@ -915,6 +944,8 @@ def _foot_inbox(win, st, q, row=None):
         keys = " g gate   p peek   e edit   r run   / filter"
     elif row is not None and row.what == "review":
         keys = " p read the report   g approve/deliver   e edit   r run   / filter"
+    elif row is not None and row.what == "retire":
+        keys = " t retire (frees the worktree)   p read the report   / filter"
     else:
         keys = " r run   g gate   p peek   e edit   / filter"
     _bar(win, h - 1, keys, "? help   q quit ")
@@ -1072,6 +1103,8 @@ def _draw_briefing(win, st, q, data_dir):
     elif r.what == "review":
         _bar(win, h - 1, " p read the report   g approve/deliver   e edit   r run",
              "n next   q quit ")
+    elif r.what == "retire":
+        _bar(win, h - 1, " t retire (frees the worktree)   p read the report", "n next   q quit ")
     else:
         _bar(win, h - 1, " r run   g gate   p peek   e edit   x reject", "n next   q quit ")
 
@@ -1464,6 +1497,7 @@ def _help(win):
         "  d l s             answer decided / leaning / spike  → tl-grill answer",
         "  x                 reject the item                   → tl-grill reject",
         "  e                 edit the backlog item or the spec → $EDITOR",
+        "  t                 retire a signed-off task          → tl-teardown (confirm)",
         "  n                 next waiting item",
         "  r                 run / resume the pipeline         → tl-run   (confirm)",
         "  g                 grill an un-grilled backlog item  → tl-grill  (confirm)",
@@ -1683,6 +1717,13 @@ def _loop(win):
         elif ch == ord("e") and target:
             path, line = _target_path(target, data_dir)
             _edit_file(win, path, line)
+            q = recompute()
+        elif ch == ord("t") and target and target.task.startswith("tl-"):
+            if _confirm(win, "Retire: tl-teardown %s  (releases its worktree; the report is kept)"
+                        % target.task):
+                argv = [os.path.join(BIN, "tl-teardown.sh"), target.task]
+                st["notice"] = _ran(argv, _shell_out(win, argv),
+                                    "retired %s — its worktree is released" % target.task)
             q = recompute()
         elif ch == ord("p") and target and target.task.startswith("tl-"):
             row = next((r for r in q.rows if r.task == target.task and r.fleet), None)

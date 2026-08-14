@@ -158,8 +158,17 @@ elif SCENARIO == "report":
     # replaces, so curses re-emits only fragments of it. The shell checks meta for `approval`.
     send("y", 2.0)                            # confirm -> tl-approve runs full-screen
     send("\n", 1.5)                           # its "approve / skip / fix ?" -> default approve
-    expect("recorded your decision", "the outcome must be reported back in the TUI",
-           seed=send("\n", 1.0))
+    screen = expect("recorded your decision", "the outcome must be reported back in the TUI",
+                    seed=send("\n", 1.0))
+    # THE REPORTED BUG: approving changed nothing, so the row went on saying "approve, skip or
+    # fix" — the decision you had just made. It must now show as signed off and retirable.
+    # Assert against the ACCUMULATED stream: the row repaints in the same breath as the notice, so
+    # a fresh drain here sees nothing (curses only re-emits what changed).
+    want(screen, "t to retire", "an approved plan must flip to a retire row")
+    expect("t retire (frees", "...and the footer must offer teardown", seed=send(" "))
+    send("t")
+    send("y", 3.0)                            # confirm -> tl-teardown releases the worktree
+    expect("retired", "teardown must report back", seed=send("\n", 1.0))
 
 elif SCENARIO == "grill-ok":
     screen = send("/backlog\n")

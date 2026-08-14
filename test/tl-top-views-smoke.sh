@@ -85,7 +85,17 @@ EOF
 2. Update the three importers
 Risk: the public re-export in __init__.py is the thing that will bite.
 EOF
-  printf 'kind=plan\npname=notes-app\nreport=%s\n' "$TL_DATA/tl-docs/report.md" \
+  # a REAL git project + worktree for it, so tl-teardown's guards and its worktree release
+  # actually run rather than being taken on trust
+  PROJ="$WORK/proj"
+  rm -rf "$PROJ"; mkdir -p "$PROJ"
+  git -C "$PROJ" init -q
+  git -C "$PROJ" config user.email t@t; git -C "$PROJ" config user.name t
+  echo hi > "$PROJ/a.txt"; git -C "$PROJ" add -A; git -C "$PROJ" commit -qm init
+  git -C "$PROJ" worktree add -q --detach "$TL_WORKTREES/tl-docs" >/dev/null 2>&1
+  git -C "$TL_WORKTREES/tl-docs" checkout -q -b tl/tl-docs
+  printf 'kind=plan\npname=notes-app\nproject=%s\nworktree=%s\nbranch=tl/tl-docs\nbase=%s\nreport=%s\n' \
+    "$PROJ" "$TL_WORKTREES/tl-docs" "$(git -C "$PROJ" rev-parse HEAD)" "$TL_DATA/tl-docs/report.md" \
     > "$TL_STATE/tl-docs.meta"
 
   printf '# questions.md\n\n### what breaks that already works?\nhits: 4   last: 2026-08-14\n_scar:_ the 2024 reindex silently dropped 11k rows\n' > "$TL_LEAD/questions.md"
@@ -115,6 +125,9 @@ echo "  S2 ok — d answers through the real tl-grill, and the next question is 
 setup; drive report     || fail "scenario 'report' (see above)"
 grep -q '^approval=approve' "$TL_STATE/tl-docs.meta" \
   || fail "S5: g on a plan did not reach tl-approve — meta has: $(grep approval "$TL_STATE/tl-docs.meta" || echo none)"
+grep -q '^state=done' "$TL_STATE/tl-docs.meta" \
+  || fail "S5: t did not retire the task — meta has: $(grep '^state=' "$TL_STATE/tl-docs.meta" || echo none)"
+[ ! -d "$TL_WORKTREES/tl-docs" ] || fail "S5: teardown left the worktree behind at $TL_WORKTREES/tl-docs"
 echo "  S5 ok — a plan's report is readable in the TUI, and g offers the right gate for its kind"
 
 setup; drive grill-ok   || fail "scenario 'grill-ok' (see above)"

@@ -58,6 +58,10 @@ use (§4).
     thing or record the decision. Reports are markdown, so **`TL_MD_VIEWER`** (e.g. `glow -w 100`)
     renders them instead of showing source — separate from `$PAGER`, which also handles the raw
     session log. No dependency adopted (§5); the default works with nothing installed.
+  - **Approving a plan now changes the row.** `tl-approve` records `approval` and `tl-deliver`
+    records `delivered`, but neither changes `tl-state` — it keeps saying `done` — so the row went
+    on asking "approve, skip or fix" after you had approved it. A signed-off task becomes a
+    `retire` row, and **`t`** runs `tl-teardown` to release its worktree (the report is kept).
   - `/` starts a **fresh** filter instead of being seeded with the current one, so `/` then enter
     clears it and a new term replaces rather than concatenates.
 - **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader

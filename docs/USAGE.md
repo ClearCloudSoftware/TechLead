@@ -329,6 +329,7 @@ are deliberate:
 | `d` / `l` / `s` | answer the selected question `decided` / `leaning` / `spike` | prompt, then `tl-grill answer <id> <qid> <state> "<text>"` |
 | `x` | reject the item (terminal, D10) | prompt for a reason, then `tl-grill reject` |
 | `e` | edit the backlog item, or the spec | `$EDITOR` (at the item's line), full-screen |
+| `t` | retire a signed-off task | **confirm**, then `tl-teardown <id>` — releases its worktree; the report is kept |
 | `n` | jump to the next waiting item | in-TUI, instant |
 | `p` | read the deliverable — the plan report, or the worker's output when there isn't one | opens it in `$TL_MD_VIEWER` (else `$PAGER`, else `less`); returns on exit |
 | `g` | **grill** an un-grilled backlog item | **confirm**, then `tl-grill <slug>` — the questions land back in the inbox to answer; no worker is dispatched |

@@ -310,7 +310,7 @@ is shared, so switching view re-frames the same decision rather than losing your
 |---|---|
 | `1` inbox | one row per thing waiting on you, loudest first; working tasks collapse to one quiet line |
 | `2` briefing | that one decision full-screen — the question, what's already decided on the item, what the backlog asked for |
-| `3` modal | `:backlog` · `:q <slug>` · `:fleet` · `:findings <id>` · `:bank` — and the only place answered questions appear, so it's where you correct one the grill inferred |
+| `3` modal | `:backlog` · `:q <slug>` · `:fleet` · `:worktrees` · `:findings <id>` · `:bank` — and the only place answered questions appear, so it's where you correct one the grill inferred |
 
 Every task runs in **its own worktree on its own branch** (`tl-spawn`, §3.11), so parallel workers are
 the normal case rather than an edge one. A dispatched row names both: `:fleet` carries a `BRANCH`
@@ -345,6 +345,15 @@ completion criterion, so a worker is not allowed to change code. `tl-top` says s
 project is at `survey`, and `H` starts the way out: `tl-scaffold-test` drafts a harness, you review
 and commit it, `tl-baseline` records the baseline and promotes the project to `ready`. From then on
 `r` dispatches a **change** worker that writes code.
+
+**`:worktrees`** is the one view whose subject isn't a task. Every task runs in its own worktree,
+and `tl_worktree_acquire` **refuses when the path already exists** — so a directory left behind by a
+teardown that never ran, or by a spawn that died between acquire and `meta_set`, permanently blocks
+that id from being re-spawned. It has no meta, so it is not a task, so nothing in the queue can show
+you the thing that is blocking you. This view lists what is actually on disk against what claims to
+own it, and carries the exact `git worktree remove` command for anything unclaimed (git refuses if
+the worktree is dirty, so the command cannot eat uncommitted work). It also flags the reverse — a
+task whose worktree has gone, which can no longer be gated or delivered.
 
 A running worker is a **row**, not a footnote — it carries how long it has been going and when its
 session last wrote, `p` follows its log live, and `r` lands you in `:fleet` on the task it just

@@ -113,6 +113,11 @@ EOF
     > "$TL_STATE/sessions/tl-worker/log"
   printf 'kind=change\npname=notes-app\nbranch=tl/tl-worker\n' > "$TL_STATE/tl-worker.meta"
 
+  # a REAL orphan: a worktree directory with no task claiming it. tl_worktree_acquire refuses when
+  # the path exists, so this permanently blocks `tl-orphan` from being re-spawned — and it has no
+  # meta, so nothing in the queue can show you the thing that is blocking you.
+  git -C "$PROJ" worktree add -q --detach "$TL_WORKTREES/tl-orphan" >/dev/null 2>&1
+
   printf '# questions.md\n\n### what breaks that already works?\nhits: 4   last: 2026-08-14\n_scar:_ the 2024 reindex silently dropped 11k rows\n' > "$TL_LEAD/questions.md"
 }
 
@@ -136,6 +141,9 @@ grep -q '^q: q3|open|' "$TL_DATA/tl-add-search/spec.md" \
 grep -q 'tl-add-search' "$TL_DATA/metrics.tsv" 2>/dev/null \
   || fail "S2: tl-grill's D13 metric did not fire — tl-top bypassed the command path"
 echo "  S2 ok — d answers through the real tl-grill, and the next question is answerable at once"
+
+setup; drive worktrees  || fail "scenario 'worktrees' (see above)"
+echo "  S7 ok — :worktrees surfaces the orphan that blocks a re-spawn, with the command to clear it"
 
 setup; drive watch      || fail "scenario 'watch' (see above)"
 echo "  S6 ok — a running worker is a row you can watch, and survey readiness explains itself"

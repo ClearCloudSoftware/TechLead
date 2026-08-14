@@ -86,7 +86,10 @@ def expect(needle, label, seed="", timeout=8.0):
     return acc
 
 
-launch = drain(3.0)
+# Wait for the first paint to COMPLETE rather than guessing a duration: startup shells out to
+# tl-state once per task, plus tl-backlog and tl-project, so the time before anything appears grows
+# with the fixture. The footer is drawn last, so its presence means the screen is fully emitted.
+launch = expect("q quit", "tl-top must paint a first screen", seed=drain(1.0), timeout=15)
 
 if SCENARIO == "render":
     want(launch, "[1 inbox]", "launch")
@@ -140,6 +143,21 @@ elif SCENARIO == "answer":
     expect("answer q3", "d must act immediately after an answer — the notice must not eat it",
            seed=send("d", 1.0))
     send("\x1b")                              # esc: leave q3 open, writing nothing
+
+elif SCENARIO == "worktrees":
+    # The one thing the queue structurally cannot show: a worktree with no task. It blocks its id
+    # from ever being re-spawned, and having no meta it is not a row anywhere else.
+    send("3")
+    screen = send(":worktrees\n")
+    want(screen, "tl-orphan", "an unclaimed worktree must be listed")
+    want(screen, "orphan", "...and named as one")
+    want(screen, "refuse", "...saying it blocks tl-spawn")
+    want(screen, "tl-docs", "a live worktree is listed too")
+    screen = send("/orphan\n")
+    # assert on fragments that cannot straddle a wrap: the pane wraps, so "worktree remove" is
+    # split across lines exactly when the path in front of it is long — which is always
+    want(screen, "git -C", "the detail pane must carry the command that clears it")
+    want(screen, "refuses if it is dirty", "...and say git will not delete uncommitted work")
 
 elif SCENARIO == "watch":
     # A dispatched task used to collapse into a one-line summary at the bottom — the one thing you

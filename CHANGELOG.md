@@ -62,6 +62,12 @@ use (§4).
     records `delivered`, but neither changes `tl-state` — it keeps saying `done` — so the row went
     on asking "approve, skip or fix" after you had approved it. A signed-off task becomes a
     `retire` row, and **`t`** runs `tl-teardown` to release its worktree (the report is kept).
+  - **`:worktrees`** — the one view whose subject is not a task. `tl_worktree_acquire` refuses when
+    a worktree path already exists, so a directory left by a teardown that never ran (or a spawn
+    that died between acquire and `meta_set`) permanently blocks that id from being re-spawned —
+    and having no meta, it is not a row anywhere else. The view lists what is on disk against what
+    claims to own it, flags orphans, teardown leaks and vanished worktrees, and carries the exact
+    `git worktree remove` command (which git refuses on a dirty worktree, so it cannot eat work).
   - **A running worker is a row**, not a one-line footnote at the bottom: the task you just
     dispatched was the one thing you could not watch. It carries elapsed time and when its session
     last wrote, **`p` follows its log** (`tl-peek --follow`, new), and `r` lands you in `:fleet` on

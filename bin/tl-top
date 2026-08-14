@@ -284,10 +284,22 @@ class QRow:
 
 
 @dataclass
+class WT:
+    """One directory under state/wt, joined to the task that should own it."""
+    name: str           # the id the path is named for
+    path: str
+    task: str           # "" when nothing claims it
+    state: str
+    note: str           # "" when healthy
+    remedy: str = ""    # the exact command that clears it, when there is one
+
+
+@dataclass
 class Queue:
     rows: list = field(default_factory=list)    # sorted, loudest first
     quiet: list = field(default_factory=list)   # fleet Rows that need nothing (working/paused)
     items: list = field(default_factory=list)   # (slug, title, id, stage, n_open, n_total)
+    worktrees: list = field(default_factory=list)   # [WT] — what is on disk vs what claims it
 
 
 # The two decisions TechLead exists to slow down — gate findings and grill questions — rank above
@@ -355,7 +367,44 @@ def read_ask(path):
     return read_meta(path)
 
 
-def build_queue_model(state_dir, data_dir, state_of, backlog_items):
+def build_worktrees(state_dir, wt_dir, state_of):
+    """Pure: what is actually on disk under state/wt, against what claims to own it.
+
+    Every task runs in its own worktree (§3.11), and tl_worktree_acquire REFUSES when the path
+    already exists — so a worktree left behind by a teardown that never ran, or by a spawn that
+    died between acquire and meta_set, permanently blocks that id from being re-spawned. It has no
+    meta, so it is not a task, so nothing in the queue can show you the thing that is blocking you.
+    This is the one view where a directory with no owner is the point."""
+    out, on_disk = [], set()
+    names = sorted(os.listdir(wt_dir)) if os.path.isdir(wt_dir) else []
+    for name in names:
+        path = os.path.join(wt_dir, name)
+        if not os.path.isdir(path):
+            continue
+        on_disk.add(name)
+        meta_path = os.path.join(state_dir, name + ".meta")
+        if not os.path.exists(meta_path):
+            out.append(WT(name, path, "", "—", "orphan — tl-spawn will refuse to reuse this id"))
+            out[-1].remedy = "git -C %s worktree remove %s   (git refuses if it is dirty)" % (path, path)
+        elif read_meta(meta_path).get("state") == "done":
+            out.append(WT(name, path, name, "torn down", "leaked — teardown did not remove it"))
+            out[-1].remedy = "git -C %s worktree remove %s   (git refuses if it is dirty)" % (path, path)
+        else:
+            out.append(WT(name, path, name, state_of(name), ""))
+
+    for mp in sorted(glob.glob(os.path.join(state_dir, "*.meta"))):
+        tid = os.path.basename(mp)[:-len(".meta")]
+        meta = read_meta(mp)
+        wt = meta.get("worktree", "")
+        if meta.get("state") == "done" or not wt or os.path.basename(wt) in on_disk:
+            continue
+        if not os.path.isdir(wt):
+            out.append(WT(os.path.basename(wt), wt, tid, state_of(tid),
+                          "gone — the task cannot be gated or delivered"))
+    return out
+
+
+def build_queue_model(state_dir, data_dir, state_of, backlog_items, wt_dir=None):
     """Pure: (fixture state, [(slug, title)]) -> Queue. backlog_items is injected for the same
     reason state_of is — so this whole function is assertable without a terminal or a subprocess."""
     q = Queue()
@@ -424,6 +473,7 @@ def build_queue_model(state_dir, data_dir, state_of, backlog_items):
             q.quiet.append(r)     # kept for `:fleet`, which lists the live fleet
             q.rows.append(QRow("working", r.id, qid="", detail=_run_detail(r), **common))
 
+    q.worktrees = build_worktrees(state_dir, wt_dir or os.path.join(state_dir, "wt"), state_of)
     q.rows.sort(key=lambda r: (r.rank, r.task, qid_key(r.qid)))
     return q
 
@@ -630,6 +680,36 @@ def _selftest():
           "':findings <id>' marks unresolved with '!': %r" % [r[0] for r in mrows])
     _c, _h, mrows = modal_table("q", "not-a-thing", q, data_dir, lead_dir)
     check(len(mrows) == 1 and mrows[0][1] is None, "':q' on an un-grilled slug says so, selects nothing")
+    # ---- worktrees: the view where a directory nobody owns is the whole point ----
+    wt_dir = os.path.join(tmp, "wt")
+    os.makedirs(os.path.join(wt_dir, "tl-a"))          # live: has a meta
+    os.makedirs(os.path.join(wt_dir, "tl-ghost"))      # orphan: no meta at all
+    os.makedirs(os.path.join(wt_dir, "tl-d"))          # meta says state=done -> teardown leaked it
+    wq = build_queue_model(state_dir, data_dir, state_of, backlog, wt_dir=wt_dir)
+    wts = {w.name: w for w in wq.worktrees}
+    check(set(wts) >= {"tl-a", "tl-ghost", "tl-d"}, "every directory on disk is listed: %r" % sorted(wts))
+    check(wts["tl-a"].task == "tl-a" and wts["tl-a"].note == "",
+          "a live worktree is unremarkable: %r" % (wts["tl-a"],))
+    check(wts["tl-ghost"].task == "" and "refuse" in wts["tl-ghost"].note,
+          "a directory with no meta must be called an orphan that blocks re-spawn: %r"
+          % (wts["tl-ghost"],))
+    check("worktree remove" in wts["tl-ghost"].remedy and wts["tl-ghost"].path in wts["tl-ghost"].remedy,
+          "...and carry the exact command that clears it: %r" % wts["tl-ghost"].remedy)
+    check(wts["tl-a"].remedy == "", "a healthy worktree needs no remedy")
+    check("leaked" in wts["tl-d"].note,
+          "a torn-down task whose directory survives is a leak, not a live worktree: %r"
+          % (wts["tl-d"],))
+    gone = [w for w in wq.worktrees if w.name == "tl-a" and w.note.startswith("gone")]
+    check(not gone, "tl-a is on disk, so it must not also be reported missing")
+    check([w for w in build_queue_model(state_dir, data_dir, state_of, backlog,
+                                        wt_dir=wt_dir + "-nope").worktrees
+           if w.note.startswith("gone")],
+          "a meta naming a worktree that is not there must be reported missing")
+    _c2, hdr2, wrows = modal_table("worktrees", "", wq, data_dir, lead_dir)
+    check("NOTE" in hdr2 and any("tl-ghost" in r[0] for r in wrows),
+          "':worktrees' lists them: %r" % [r[0] for r in wrows])
+    check(all(r[1] is not None for r in wrows), "every worktree row is selectable")
+
     _c, hdr, mrows = modal_table("fleet", "", q, data_dir, lead_dir)
     check(len(mrows) == len(q.quiet) + len([r for r in q.rows if r.fleet]),
           "':fleet' shows every live task, loud ones first")
@@ -684,6 +764,7 @@ def _selftest():
     print("PASS: tl-top fleet model (priority order, exclusion, waiting-on)")
     print("PASS: tl-top queue model (backlog+spec+fleet join, rank order, cursor keys)")
     print("PASS: tl-top modal tables (backlog/q/bank/findings/fleet, keys resolve to queue rows)")
+    print("PASS: tl-top worktrees view (orphans, leaks, and missing ones)")
     print("PASS: tl-top inbox layout (DETAIL wraps under its column, rows vary in height)")
 
 
@@ -1199,6 +1280,14 @@ def modal_table(view, arg, q, data_dir, lead_dir):
         return ("techlead > findings > %s" % tid,
                 "%-2s %-10s %-18s %s" % ("", "CLASS", "RULE", "DETAIL"),
                 rows or [("no findings for '%s'" % tid, None)])
+    if view in ("worktrees", "wt"):
+        rows = [("%-24s %-22s %-12s %s" % (w.name[:24], (w.task or "—")[:22], w.state[:12], w.note),
+                 Target(w.task or w.name, "", "", "",
+                        " · ".join(x for x in (w.path, w.note, w.remedy) if x)))
+                for w in q.worktrees]
+        return ("techlead > worktrees",
+                "%-24s %-22s %-12s %s" % ("PATH under state/wt", "TASK", "STATE", "NOTE"),
+                rows or [("no worktrees — nothing is dispatched", None)])
     if view == "bank":
         entries = read_bank(os.path.join(lead_dir, "questions.md"))
         rows = [("%-5s %s" % (hits, question), None) for question, hits, _scar in entries]
@@ -1252,7 +1341,7 @@ def _draw_modal(win, st, q, data_dir):
               else (sel_t.task if sel_t else ""))
     if sel_t and sel_t.text:
         y = _para(win, y, h - 2, 1, sel_t.text)
-    _addln(win, h - 2, 1, ":backlog  :q <slug>  :fleet  :findings <id>  :bank  ·  / filters",
+    _addln(win, h - 2, 1, ":backlog  :q <slug>  :fleet  :worktrees  :findings <id>  :bank  ·  / filters",
            _bucket_attr("quiet"))
     if st["notice"]:
         _bar(win, h - 1, " " + st["notice"], " (any key) ")
@@ -1580,7 +1669,7 @@ def _help(win):
         "                    …or resolve the delivery gate     → tl-deliver (confirm)",
         "  p                 read the report · follow a running worker · peek",
         "  H                 draft a test harness              → tl-scaffold-test (confirm)",
-        "  / :               filter · command (view 3)",
+        "  / :               filter · command (:worktrees finds ones that block a re-spawn)",
         "  ? q               this help · quit",
         "",
         "  tl-top renders, never mutates: every consequence runs the real tl-* command.",
@@ -1642,11 +1731,12 @@ def _command(win, st):
         return ""
     parts = cmd.split()
     verb, arg = parts[0].lstrip(":"), (parts[1] if len(parts) > 1 else "")
-    if verb in ("backlog", "fleet", "bank", "q", "findings"):
+    if verb in ("backlog", "fleet", "bank", "q", "findings", "worktrees", "wt"):
         st["modal"] = (verb, arg)
         st["msel"] = 0
         return ""
-    return "unknown command ':%s' — try :backlog :q <slug> :fleet :findings <id> :bank" % verb
+    return ("unknown command ':%s' — try :backlog :q <slug> :fleet :worktrees :findings <id> :bank"
+            % verb)
 
 
 def _target_path(target, data_dir):
@@ -1700,7 +1790,9 @@ def _loop(win):
     state_dir, data_dir = _state_paths()
 
     def recompute():
-        return build_queue_model(state_dir, data_dir, tl_state, tl_backlog_list())
+        return build_queue_model(state_dir, data_dir, tl_state, tl_backlog_list(),
+                                 wt_dir=os.environ.get("TL_WORKTREES")
+                                 or os.path.join(state_dir, "wt"))
 
     q = recompute()
     st = {"view": 1, "cursor": q.rows[0].key if q.rows else None,

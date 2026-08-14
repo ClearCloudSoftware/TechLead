@@ -72,15 +72,6 @@ use (§4).
 - **Colourised output** — `tl_stop`/`tl_ok`/`tl_kv`/`tl_note` in `tl-common.sh` give refusals,
   successes, and next-step lines distinct weight. Only when stdout is a terminal; `NO_COLOR` honoured,
   so piped and captured output is byte-identical to before.
-- **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
-  trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
-  superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K
-  tokens per always-loaded file) in `AGENTS.md`. Convention only, lifted from an evaluated-and-
-  rejected memory tool — no dependency or runtime.
-- **`tl-scrub`** — a deterministic deny-pattern guard that scans content entering `lead/`/`decisions/`
-  for keys, tokens, credentials, and internal hostnames; on a hit it escalates for owner review and
-  never strips (`test/scrub-smoke.sh`).
-
 ### Fixed
 
 - **The smoke suite inherited `config/instance.env`.** Every test exports `TL_HOME=$REPO`, and
@@ -127,6 +118,14 @@ nothing crosses into deciding what "correct" means without a human.
   and a review bumps the `review-rubric.md` rules its findings cited (the driver reports which via a
   numbered ref; `bump_hits` in `tl-common.sh` is the single owner of the write). The D13 / risk-1
   reuse signal is no longer hand-kept. (#107, #109)
+- **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
+  trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
+  superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K
+  tokens per always-loaded file) in `AGENTS.md`. Convention only, lifted from an evaluated-and-
+  rejected memory tool — no dependency or runtime.
+- **`tl-scrub`** — a deterministic deny-pattern guard that scans content entering `lead/`/`decisions/`
+  for keys, tokens, credentials, and internal hostnames; on a hit it escalates for owner review and
+  never strips (`test/scrub-smoke.sh`).
 
 ### Fixed
 

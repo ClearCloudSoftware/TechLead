@@ -47,6 +47,20 @@ export TL_HOME TL_DATA TL_STATE TL_LEAD TL_WORKTREES   # so a spawned worker inh
 tl_log() { printf 'tl: %s\n' "$*" >&2; }
 tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }
 
+# Harness visibility (§2.7, §3.11): a worker's worktree branches from HEAD and the gate runs there too,
+# so anything UNCOMMITTED in the project — most painfully the test harness — is invisible to both. The
+# baseline (run against the working tree) then measures something the worker/gate never see. Warn at the
+# chokepoints so that fails loud instead of silently. Returns 0 if clean, 1 if it warned.
+tl_warn_uncommitted() { # <repo-path> <trailing advice>
+  local repo="$1" advice="${2:-}" dirty
+  dirty="$(git -C "$repo" status --porcelain 2>/dev/null)" || return 0   # not a git repo → nothing to check
+  [ -n "$dirty" ] || return 0
+  tl_log "⚠ uncommitted changes in $repo — a worker branches from HEAD (and the gate runs there), so"
+  tl_log "  these are INVISIBLE to it, including your test harness. $advice"
+  printf '%s\n' "$dirty" | sed 's/^/    /' >&2
+  return 1
+}
+
 # Seed the lead/ file skeleton — the E6.2/§2.4 SHAPE only, never borrowed judgment (lead/README is
 # explicit that principles must accrete from real grills). Per-project now (owner decision
 # 2026-08-14): each managed repo grows its own judgment. Existing files are left untouched.

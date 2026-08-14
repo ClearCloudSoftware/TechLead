@@ -10,6 +10,12 @@ use (§4).
 
 ### Changed
 
+- **`tl-kickoff` streams the interview live** — each turn now forms token-by-token in the terminal
+  instead of sitting behind a several-second silent wait (`--output-format stream-json
+  --include-partial-messages`, #114). On by default for the shipped claude adapter at a tty and off
+  for demo/opencode/pipes (`TL_KICKOFF_STREAM` is the single source of truth for both loop and
+  adapter, so the streamed question is never re-echoed); falls back to the proven single-shot
+  `--output-format json` path when streaming is off or yields nothing. `kickoff-smoke` unchanged.
 - **`tl-baseline`, `tl-scaffold-test`, `tl-scaffold-context` infer the project** from the current
   `.techlead` when no `<name>` is given (per-project state means one per repo), like `tl-kickoff` —
   no more retyping the name you're standing in. They refuse with a clear message when zero or more

@@ -17,9 +17,9 @@ context_md="${2:-}"
 corpus="$(mktemp)"
 add() { [ -f "$1" ] || return 0; case "$1" in */TEMPLATE.md) return 0;; esac
         printf '\n===== SOURCE: %s =====\n' "${1#"$TL_HOME"/}" >> "$corpus"; cat "$1" >> "$corpus"; }
-for f in "$TL_HOME"/lead/decisions/*.md; do add "$f"; done
+for f in "$TL_LEAD"/decisions/*.md; do add "$f"; done
 for f in "$TL_HOME"/data/*/spec.md;     do add "$f"; done
-add "$TL_HOME/lead/principles.md"
+add "$TL_LEAD/principles.md"
 [ -n "$context_md" ] && add "$context_md"
 
 if [ ! -s "$corpus" ]; then rm -f "$corpus"; echo "I don't know — your written record is empty."; exit 0; fi

@@ -16,7 +16,7 @@ case "${1:?usage: tl-standards run|findings|report ID}" in
     : "${TL_STANDARDS_CMD:?tl: no Standards reviewer — set TL_STANDARDS_CMD (e.g. adapters/claude-standards.sh)}"
     # the repo's documented standards: AGENTS.md (canonical, §2.7 + q3) + this instance's review-rubric.md
     std="$(mktemp)"
-    for f in "$ppath/AGENTS.md" "$TL_HOME/lead/review-rubric.md"; do
+    for f in "$ppath/AGENTS.md" "$TL_LEAD/review-rubric.md"; do
       [ -f "$f" ] && { printf '\n# from %s\n' "$f"; cat "$f"; } >> "$std"
     done
     diff="$(mktemp)"; git -C "$wt" --no-pager diff "$base"..HEAD > "$diff" 2>/dev/null || true

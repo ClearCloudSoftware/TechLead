@@ -23,13 +23,14 @@ for zero tokens while idle, grill a backlog item into a spec, and deliver a revi
 | **owner** | You. Final authority on every merge and published answer. |
 | **lead** | The orchestrator. Never writes code. In Phase 0 that's you at the terminal + the scripts. |
 | **worker** | One agent, one task, one isolated worktree, on branch `tl/<id>`. |
-| **instance** | A checkout of *this* repo. `TL_HOME` points at it. It owns `bin/`, `lead/`, and the gitignored `data/` (durable) and `state/` (volatile). |
+| **instance** | A checkout of *this* repo (the tool). `TL_HOME` points at it. It owns `bin/`, `adapters/`, and `AGENTS.md`. |
+| **project state** | Each managed repo keeps its own state in `<project>/.techlead/` — `data/` (backlog, specs, registry), `state/` (task status/worktrees), and its own `lead/` (judgment). Gitignored, like `.claude/`/`.superpowers/`. Being *in* the project selects it (nearest `.techlead/` wins). |
 | **kind** | `plan` (writes a report, zero blast radius) or `change` (edits code, gated before delivery). |
 
 The pipeline:
 
 ```
-data/backlog.md → tl-grill → spec.md → tl-brief → brief.md → tl-spawn → worktree
+.techlead/data/backlog.md → tl-grill → spec.md → tl-brief → brief.md → tl-spawn → worktree
    → worker → tl-watch (supervise) → tl-gate (change only) → tl-deliver → teardown
 ```
 
@@ -44,8 +45,11 @@ export TL_HOME="$PWD"
 export PATH="$PWD/bin:$PATH"     # optional, so you can type `tl-spawn` instead of bin/tl-spawn.sh
 ```
 
-`data/`, `state/`, and `config/` are created under `TL_HOME` on first use. Override their location
-with `TL_DATA` / `TL_STATE` / `TL_WORKTREES` (the tests do this to stay isolated).
+`TL_HOME` is the **tool** — `config/` is created under it on first use. A managed project's own
+`data/`, `state/`, and `lead/` live in `<project>/.techlead/` (created by `tl-onboard`/`tl-new`), and
+commands resolve which project by walking up from the current directory to the nearest `.techlead/` —
+so **run pipeline commands from inside the project**. Override the resolved paths with
+`TL_DATA` / `TL_STATE` / `TL_LEAD` / `TL_WORKTREES` (the tests do this to stay isolated).
 
 ### Guided setup (the wizard)
 
@@ -53,10 +57,10 @@ Three commands wrap the raw configuration below, so setup is a few keystrokes in
 `tl-project` calls — all bash, no new runtime:
 
 ```sh
-bin/tl-init.sh                       # instance config → config/instance.env: harness, model,
-                                     #   TL_PROJECTS_DIR, and an optional lead/ skeleton
-bin/tl-onboard.sh /abs/path/to/repo  # brownfield: register an EXISTING repo in place + baseline
-bin/tl-new.sh myapp                  # greenfield: create an empty repo under TL_PROJECTS_DIR
+bin/tl-init.sh                       # tool config → config/instance.env: harness, model
+bin/tl-onboard.sh /abs/path/to/repo  # brownfield: register an EXISTING repo in place (+ its
+                                     #   .techlead/ and a baseline)
+bin/tl-new.sh myapp                  # greenfield: create ./myapp (empty) with its own .techlead/
 ```
 
 `tl-init` writes `config/instance.env`, which every `tl-*` command auto-loads — **env you already
@@ -146,7 +150,8 @@ tl-baseline.sh myapp        # runs test_command, records the known-failing set
 
 ### 1. Author a backlog item
 
-`data/backlog.md` is a plain markdown queue, one item per heading `## <slug>: <title>`:
+`.techlead/data/backlog.md` (in the project) is a plain markdown queue, one item per heading
+`## <slug>: <title>`:
 
 ```markdown
 # Backlog
@@ -356,12 +361,12 @@ TL_APPROVE=yes bin/tl-deliver.sh af1           # gate → ff-merge onto main
 
 | Var | Purpose |
 |-----|---------|
-| `TL_HOME` | Instance root (= repo root). Required. |
-| `TL_DATA` / `TL_STATE` / `TL_WORKTREES` | Override storage locations (default under `TL_HOME`). |
+| `TL_HOME` | Tool root (= this repo's root). Required. |
+| `TL_DATA` / `TL_STATE` / `TL_LEAD` / `TL_WORKTREES` | Override storage locations (default: the nearest `<project>/.techlead/`, else `TL_HOME`). |
 | `TL_WORKER_CMD` | Worker adapter (real agent or demo). |
 | `TL_GRILL_CMD` | Grill inference driver. |
 | `TL_OPENCODE_MODEL` | Model for the opencode adapters; must support tools. **Local pick: `ollama/qwen3-coder:30b`.** |
-| `TL_BACKLOG` | Backlog path (default `data/backlog.md`). |
+| `TL_BACKLOG` | Backlog path (default `<project>/.techlead/data/backlog.md`). |
 | `TL_APPROVE=yes` | Non-interactive approval (tests/automation); `TL_RESOLVE` sets the finding resolution. |
 | `TL_WATCH_INTERVAL` / `TL_FRESH_SECS` / `TL_DONE_STABLE` | Watcher tuning. |
 | `TL_TOP_INTERVAL` | `tl-top` refresh interval, in seconds (default 2). |

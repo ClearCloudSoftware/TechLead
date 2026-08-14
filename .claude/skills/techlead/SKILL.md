@@ -39,6 +39,10 @@ Deciding either turns you into the lead — the one thing TechLead keeps human. 
 
 ## Build (features into the project)
 
+**`cd` into the project directory first.** Each project keeps its own state in `<project>/.techlead/`
+(backlog, specs, task state, its own `lead/`) — like `.claude/`/`.superpowers/`. Being *in* the project
+is what selects it, so every command below resolves the right project from the current directory.
+
 Read state to know the next step — don't hardcode an order:
 `tl-project get <name> readiness` · `tl-spec get <id> state` + `open-count` · `tl-state <id>`.
 
@@ -46,7 +50,7 @@ Read state to know the next step — don't hardcode an order:
    behaviour — a `#!/bin/sh` that runs it and `echo`s one failing-id per broken behaviour — **show it,
    let the owner tweak/approve**, then `tl-project set <name> test_command "sh test.sh"` →
    `tl-baseline <name>` (promotes to ready).
-2. Add each feature to `data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
+2. Add each feature to `.techlead/data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
 3. `tl-run <slug>` — grills, then spawns.  → **open questions? HARD-STOP (rule 1).**
 4. `tl-watch --once` (or poll `tl-state <id>`) until the worker is `done`.
 5. `tl-run <slug>` again — runs the gate.  → **findings? HARD-STOP (rule 2).** Clean → it ff-merges.
@@ -54,4 +58,5 @@ Read state to know the next step — don't hardcode an order:
 ## Notes
 
 - You draft the test harness; the owner owns *what "correct" means* — always show it before baselining.
-- One project registered → commands resolve it. Two+ → `tl-spec set <id> project <name>`.
+- Commands resolve the project from the current directory (nearest `.techlead/`). Run them from
+  inside the project — after `tl-new <x>`, `cd <x>` before Build.

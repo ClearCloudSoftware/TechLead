@@ -34,17 +34,9 @@ mkdir -p "$(dirname "$TL_CONFIG")"
 } > "$TL_CONFIG"
 tl_log "wrote $TL_CONFIG"
 
-# Seed the lead/ file skeleton — the E6.2/§2.4 SHAPE only, never borrowed judgment: lead/README is
-# explicit that principles must accrete from real grills. Existing files are left untouched.
-if tl_confirm SEED_LEAD "scaffold the lead/ file skeleton (empty stubs)" "y"; then
-  L="$TL_HOME/lead"; mkdir -p "$L/decisions"
-  [ -e "$L/decisions/.gitkeep" ] || : > "$L/decisions/.gitkeep"
-  for f in principles review-rubric delegation escalation questions voice; do
-    [ -f "$L/$f.md" ] && continue
-    printf '# %s\n\n<!-- stub (tl-init). Shape: lead/SHAPE.md. Fill from real grills; do not seed borrowed judgment (lead/README). -->\n' "$f" > "$L/$f.md"
-  done
-  tl_log "seeded lead/ skeleton (stubs — fill questions.md before grilling)"
-fi
+# NB: lead/ is no longer seeded here — it is per-project now (owner decision 2026-08-14). tl-new and
+# tl-onboard scaffold each managed repo's own <project>/.techlead/lead skeleton. tl-init configures
+# the tool only; it never becomes authoritative state.
 
 printf 'tl: instance configured (harness=%s)\n' "$harness" >&2
 printf 'tl: next → register an existing repo: tl-onboard <path>   |   create a new one: tl-new <name>\n' >&2

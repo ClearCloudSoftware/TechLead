@@ -21,14 +21,55 @@ fi
 TL_CONFIG="${TL_CONFIG:-$TL_HOME/config/instance.env}"; export TL_CONFIG
 [ -f "$TL_CONFIG" ] && . "$TL_CONFIG"
 
-TL_DATA="${TL_DATA:-$TL_HOME/data}"
-TL_STATE="${TL_STATE:-$TL_HOME/state}"
+# Per-project state (owner decision 2026-08-14): data/state/lead live in <project>/.techlead, NOT
+# in TL_HOME. TL_HOME is the tool install (bin/, adapters/, AGENTS.md, config); every managed repo
+# keeps its own working state beside its code — the same convention as .claude/ and .superpowers/.
+# Resolution is "nearest ancestor wins": walk up from $PWD to the closest .techlead/ (so being *in*
+# a project is what selects it — no multi-project ambiguity). Outside any project (e.g. tl-init) we
+# fall back to TL_HOME so tool-level commands still work. An already-exported TL_DATA/TL_STATE/TL_LEAD
+# wins over resolution — tl-new/tl-onboard use that to target the project they are creating.
+tl__find_root() {   # echoes the nearest ancestor .techlead dir, or non-zero if none
+  d="$PWD"
+  while [ "$d" != / ]; do
+    [ -d "$d/.techlead" ] && { printf '%s\n' "$d/.techlead"; return 0; }
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+TL_ROOT="$(tl__find_root || echo "$TL_HOME")"
+TL_DATA="${TL_DATA:-$TL_ROOT/data}"
+TL_STATE="${TL_STATE:-$TL_ROOT/state}"
+TL_LEAD="${TL_LEAD:-$TL_ROOT/lead}"        # judgment layer, per-project (single owner of the path)
 TL_WORKTREES="${TL_WORKTREES:-$TL_STATE/wt}"
 mkdir -p "$TL_DATA" "$TL_STATE" "$TL_WORKTREES"
-export TL_HOME TL_DATA TL_STATE TL_WORKTREES   # so a spawned worker inherits its instance
+export TL_HOME TL_DATA TL_STATE TL_LEAD TL_WORKTREES   # so a spawned worker inherits its instance
 
 tl_log() { printf 'tl: %s\n' "$*" >&2; }
 tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+# Seed the lead/ file skeleton — the E6.2/§2.4 SHAPE only, never borrowed judgment (lead/README is
+# explicit that principles must accrete from real grills). Per-project now (owner decision
+# 2026-08-14): each managed repo grows its own judgment. Existing files are left untouched.
+tl_seed_lead() { # <lead-dir>
+  local L="$1"; mkdir -p "$L/decisions"
+  [ -e "$L/decisions/.gitkeep" ] || : > "$L/decisions/.gitkeep"
+  local f
+  for f in principles review-rubric delegation escalation questions voice; do
+    [ -f "$L/$f.md" ] && continue
+    printf '# %s\n\n<!-- stub (tl-scaffold). Shape: lead/SHAPE.md. Fill from real grills; do not seed borrowed judgment (lead/README). -->\n' "$f" > "$L/$f.md"
+  done
+}
+
+# Create <root>/.techlead/{data,state,lead} for a managed repo and keep it out of the repo's history
+# (like .claude/.superpowers — private working state, not source). Single owner of the .techlead shape.
+tl_scaffold_project() { # <project-root>
+  local root="$1" th="$1/.techlead"
+  mkdir -p "$th/data/projects" "$th/state" "$th/lead"
+  tl_seed_lead "$th/lead"
+  if [ -d "$root/.git" ] && ! grep -qxF '.techlead/' "$root/.gitignore" 2>/dev/null; then
+    printf '.techlead/\n' >> "$root/.gitignore"
+  fi
+}
 
 # task metadata — one key=value per line in state/<id>.meta (§3.2). Single owner of task state.
 tl_meta_file() { printf '%s/%s.meta' "$TL_STATE" "$1"; }

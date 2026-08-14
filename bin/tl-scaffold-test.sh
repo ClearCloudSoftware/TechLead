@@ -9,7 +9,8 @@
 # need this. This is for the greenfield case where there is no runner to detect.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
-name="${1:?usage: tl-scaffold-test <project>   (run from inside the project)}"
+name="${1:-}"
+[ -n "$name" ] || name="$(tl_current_project)" || tl_die "run from inside a project (or pass its name). Registered here: $(ls "$TL_DATA/projects" 2>/dev/null | sed 's/\.conf$//' | tr '\n' ' ')"
 path="$("$BIN/tl-project.sh" get "$name" path)" || tl_die "unknown project: $name (run from inside it, or tl-onboard/tl-new it first)"
 backlog="$path/.techlead/data/backlog.md"
 [ -f "$backlog" ] || tl_die "no backlog at $backlog — add the behaviours first (one '## <slug>: <title>' per item)"

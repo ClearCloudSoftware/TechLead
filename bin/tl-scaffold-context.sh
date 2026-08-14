@@ -8,7 +8,8 @@
 # doc. Once committed, the grill/review/answer read them (a worker's worktree branches from HEAD).
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
-name="${1:?usage: tl-scaffold-context <project>   (run from inside the project)}"
+name="${1:-}"
+[ -n "$name" ] || name="$(tl_current_project)" || tl_die "run from inside a project (or pass its name). Registered here: $(ls "$TL_DATA/projects" 2>/dev/null | sed 's/\.conf$//' | tr '\n' ' ')"
 path="$("$BIN/tl-project.sh" get "$name" path)" || tl_die "unknown project: $name (run from inside it, or tl-onboard/tl-new it first)"
 
 scaffolder="${TL_SCAFFOLD_CONTEXT_CMD:-}"

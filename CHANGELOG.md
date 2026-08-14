@@ -8,6 +8,13 @@ use (§4).
 
 ## [Unreleased]
 
+### Changed
+
+- **`tl-baseline`, `tl-scaffold-test`, `tl-scaffold-context` infer the project** from the current
+  `.techlead` when no `<name>` is given (per-project state means one per repo), like `tl-kickoff` —
+  no more retyping the name you're standing in. They refuse with a clear message when zero or more
+  than one project is registered (`test/infer-project-smoke.sh`).
+
 ### Added
 
 - **`tl-scaffold-context`** — drafts a project's `AGENTS.md` (layout, conventions, danger zones) and

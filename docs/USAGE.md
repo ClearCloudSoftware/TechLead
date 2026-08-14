@@ -288,32 +288,59 @@ The watcher costs **zero tokens while idle** (it polls with `kill -0`/`stat`, no
 worker needs a decision it escalates in the terminal with a stated default; if you don't answer,
 the default fires and is logged (park-don't-block).
 
-**A live fleet view (convenience).** `tl-top` is a read-only `curses` dashboard over `tl-state` —
-one row per active task, refreshing on a timer (`TL_TOP_INTERVAL`, default 2s) and on keypress,
-with the **stop-condition** tasks (needs-decision, unresolved gate findings, blocked, failed)
-sorted loud to the top so a glance answers "who needs me"; working/paused tasks recede.
+**A live queue view (convenience).** `tl-top` is a read-only `curses` dashboard, refreshing on a
+timer (`TL_TOP_INTERVAL`, default 2s) and on keypress. It shows the whole owner queue, not just
+running workers — it joins three sources, so an item you added to the backlog and never grilled,
+or grilled and left with open questions, is visible too:
+
+| Source | Contributes |
+|---|---|
+| `data/backlog.md` | items with no task yet (`never grilled`) |
+| `data/<id>/spec.md` | one row per **open grill question** |
+| `state/<id>.meta` + `tl-state` + `findings.json` | gate findings, worker decisions, blocked/failed, ready-to-review |
 
 ```sh
-tl-top                 # live read-only fleet view; q to quit
+tl-top                 # live read-only queue view; q to quit
 ```
 
-The keymap — navigation is instant, consequences are deliberate:
+**Three views over one cursor** — `1`/`2`/`3`, or `tab` to cycle. The cursor is `(task, qid)` and
+is shared, so switching view re-frames the same decision rather than losing your place:
+
+| View | Shows |
+|---|---|
+| `1` inbox | one row per thing waiting on you, loudest first; working tasks collapse to one quiet line |
+| `2` briefing | that one decision full-screen — the question, what's already decided on the item, what the backlog asked for |
+| `3` modal | `:backlog` · `:q <slug>` · `:fleet` · `:findings <id>` · `:bank` — and the only place answered questions appear, so it's where you correct one the grill inferred |
+
+The keymap is global (the same keys work in all three views) — navigation is instant, consequences
+are deliberate:
 
 | Key | Action | How |
 |-----|--------|-----|
-| `↑` / `↓` (or `k` / `j`) | move the selection | in-TUI, instant |
-| `enter` | expand / collapse the detail pane (peek snapshot + findings + spec/brief paths) | in-TUI, instant |
+| `1` `2` `3` / `tab` | switch view | in-TUI, instant |
+| `↑` / `↓` (or `k` / `j`) | move the cursor | in-TUI, instant |
+| `d` / `l` / `s` | answer the selected question `decided` / `leaning` / `spike` | prompt, then `tl-grill answer <id> <qid> <state> "<text>"` |
+| `x` | reject the item (terminal, D10) | prompt for a reason, then `tl-grill reject` |
+| `e` | edit the backlog item, or the spec | `$EDITOR` (at the item's line), full-screen |
+| `n` | jump to the next waiting item | in-TUI, instant |
 | `p` | peek the selected worker's output full-screen | opens it in `$PAGER` (default `less`); returns on exit |
-| `r` | run / resume the pipeline for the selected task | **confirm**, then `tl-run <slug>` in the normal terminal |
+| `r` | run / resume the pipeline for the selected item | **confirm**, then `tl-run <slug>` in the normal terminal |
 | `g` | resolve the delivery gate for the selected task | **confirm**, then `tl-deliver <id>` — its gate prompts approve/skip/fix per finding |
-| `q` | quit | — |
+| `/` `:` | filter · command (view 3) | prompt |
+| `?` / `q` | keys · quit | — |
 
-It **renders, never mutates.** The only keys with a consequence (`p`, `r`, `g`) shell out to the
-real command; `r`/`g` each require a confirm, then drop you into that command's own
-approve/skip/fix prompts — there is no bulk-approve and no single-keystroke merge. It is **never
-load-bearing**: if `tl-top` is broken or absent, every command above is the fallback, and killing
-it — even mid-action — changes nothing (the shelled command ran or didn't, on its own terms;
-`tl-top` holds no state).
+The answer prompt is `curses.textpad` (`^A`/`^E`/`^K`/`^U`, arrows, wrapping). It opens **seeded**:
+an already-answered question starts with its answer, so accepting what the grill inferred is `d`
+then `enter`, and correcting it is the same two keys with typing in between. An *open* question
+starts empty — `spec.md`'s 5th field still holds the question at that point, not an answer.
+
+It **renders, never mutates.** Every key with a consequence runs the real `tl-*` command, so their
+validation and refusals still apply — `d`/`l`/`s`/`x` go through `tl-grill` (which is what logs the
+correction to `inferred-outcomes.tsv`), `e` hands the file to `$EDITOR`, `r`/`g` each require a
+confirm and then drop you into that command's own approve/skip/fix prompts. There is no
+bulk-approve and no single-keystroke merge. It is **never load-bearing**: if `tl-top` is broken or
+absent, every command above is the fallback, and killing it — even mid-prompt — changes nothing
+(the shelled command ran or didn't, on its own terms; `tl-top` holds no state).
 
 ### 6a. Approve a `plan`
 

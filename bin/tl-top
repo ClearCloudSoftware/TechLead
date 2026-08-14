@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
-"""tl-top — read-only fleet TUI (§3.5 viewer).
+"""tl-top — read-only queue TUI (§3.5 viewer).
 
 Render, never mutate. It reads current state and displays it; every consequence is a
-shell-out to the real tl-* command, run full-screen in the normal terminal, so the
-auditable command path — and its refusals — still own the decision. Killing tl-top at
-any point (including mid-action) leaves system state correct: the shelled command ran
-or it didn't, on its own terms. Stdlib curses only (ADR-002); holds no state — every
-refresh recomputes the fleet from tl-state and the files.
+shell-out to the real tl-* command, so the auditable command path — and its refusals — still
+own the decision. Killing tl-top at any point (including mid-action) leaves system state
+correct: the shelled command ran or it didn't, on its own terms. Stdlib curses only; holds no
+authoritative state — every refresh recomputes the queue from tl-state and the files.
 
-The fleet-model builder (build_fleet_model) is a PURE function with no curses calls, so
-it is testable without a terminal: `tl-top --selftest` asserts it against fixture state.
+THREE VIEWS over one model and one shared cursor (1/2/3, or tab):
+  1 inbox     one row per thing waiting on the owner — the default
+  2 briefing  that one decision, full-screen, with its context
+  3 modal     :commands over the same data, for going straight to a thing
+The cursor is (task, qid); each view renders it, so switching re-frames rather than losing
+your place.
+
+The model builders (build_fleet_model, build_queue_model) are PURE functions with no curses
+calls, so they are testable without a terminal: `tl-top --selftest` asserts them against
+fixture state.
 """
 import glob
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -122,6 +130,211 @@ def build_fleet_model(state_dir, data_dir, state_of):
     return rows
 
 
+# ------------------------------------------------------------------ the queue (pure)
+# The fleet is one of three sources the owner's actual queue spans. An item that has been added
+# to the backlog but never grilled, or grilled and sitting on open questions, has no .meta at
+# all — so it is invisible to build_fleet_model by construction. The queue joins:
+#   data/backlog.md      ## slug: title + body        (injected as backlog_items)
+#   data/<id>/spec.md    q: qid|state|source|at|text  (tl-spec.sh's flat encoding, read side)
+#   state/<id>.meta      + tl-state + findings.json   (build_fleet_model)
+
+
+@dataclass
+class Q:
+    qid: str
+    state: str          # decided | leaning | open | spike
+    source: str         # owner | inferred
+    at: str
+    text: str
+
+
+@dataclass
+class Spec:
+    state: str          # drafted | specified | rejected
+    title: str
+    questions: list = field(default_factory=list)
+
+
+@dataclass
+class Target:
+    """What an action key acts on, wherever the cursor happens to live. Views build one of these;
+    the action handlers take nothing else, so d/l/s/x/e/r/g behave identically in all three."""
+    task: str           # "tl-<slug>", or the bare slug for an item with no spec yet
+    qid: str            # "" for item/task-level actions
+    seed: str           # what the answer prompt starts with — see seed_for()
+    slug: str
+
+
+def seed_for(question):
+    """Single owner of what the answer prompt is pre-filled with.
+
+    spec.md's 5th field is dual-purpose (tl-spec.sh's encoding): for an OPEN question it holds the
+    QUESTION, for an answered one it holds the ANSWER. So seeding from it is right only once the
+    question has been answered — that is the accept-or-correct case, where the grill's inference is
+    already there and you are agreeing with it or editing it. An open question starts empty: there
+    is no inferred answer to accept, and pre-filling it with the question would invite answering
+    the prompt by mangling the question."""
+    return "" if question.state == "open" else question.text
+
+
+@dataclass
+class QRow:
+    """One thing waiting on the owner. `what` is both the row's kind and its sort priority."""
+    what: str           # gate|question|decision|blocked|failed|review|ready|backlog
+    task: str           # task id ("tl-<slug>"), or the slug for a never-grilled item
+    slug: str
+    qid: str            # "" unless what == "question"
+    detail: str
+    title: str = ""
+    fleet: object = None    # the fleet Row, when this came from a dispatched task
+    spec: object = None     # the Spec, when the item has been grilled
+
+    @property
+    def key(self):
+        return "%s|%s|%s" % (self.what, self.task, self.qid)
+
+    @property
+    def rank(self):
+        return _QRANK.get(self.what, 9)
+
+    @property
+    def target(self):
+        q = self.question
+        return Target(self.task, self.qid, seed_for(q) if q else "", self.slug)
+
+    @property
+    def question(self):
+        if self.what != "question" or not self.spec:
+            return None
+        for x in self.spec.questions:
+            if x.qid == self.qid:
+                return x
+        return None
+
+
+@dataclass
+class Queue:
+    rows: list = field(default_factory=list)    # sorted, loudest first
+    quiet: list = field(default_factory=list)   # fleet Rows that need nothing (working/paused)
+    items: list = field(default_factory=list)   # (slug, title, id, stage, n_open, n_total)
+
+
+# The two decisions TechLead exists to slow down — gate findings and grill questions — rank above
+# everything else. Un-grilled backlog items sit at the bottom: they are work you have not asked
+# for yet, not work that is stuck.
+_QRANK = {
+    "gate": 0,          # unresolved findings — the delivery gate is holding
+    "question": 1,      # an open grill question blocks dispatch
+    "decision": 2,      # a worker is waiting on an answer
+    "blocked": 3,
+    "failed": 4,
+    "review": 5,        # deliverable ready
+    "ready": 6,         # specified, never dispatched
+    "backlog": 7,       # never grilled
+}
+
+
+def slugify(s):
+    """Mirror of tl-grill.sh's slugify — the id is 'tl-' + this, so it must not drift."""
+    out = "".join(c if c.isalnum() else "-" for c in s.lower())
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out.strip("-")
+
+
+def read_spec(path):
+    """data/<id>/spec.md -> Spec, or None if absent. Read side of tl-spec.sh's encoding (§3.10):
+    front matter between the first two '---', one pipe-encoded line per question."""
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    spec, n = Spec(state="", title=""), 0
+    for ln in lines:
+        if ln == "---":
+            n += 1
+            if n == 2:
+                break
+            continue
+        if n != 1:
+            continue
+        if ln.startswith("state: "):
+            spec.state = ln[7:].strip()
+        elif ln.startswith("title: "):
+            spec.title = ln[7:].strip()
+        elif ln.startswith("q: "):
+            parts = ln[3:].split("|", 4)
+            if len(parts) == 5:
+                spec.questions.append(Q(*parts))
+    return spec
+
+
+def read_ask(path):
+    """data/<id>/ask (key=value) — the pending escalation tl-escalate would present. Absent -> {}."""
+    return read_meta(path)
+
+
+def build_queue_model(state_dir, data_dir, state_of, backlog_items):
+    """Pure: (fixture state, [(slug, title)]) -> Queue. backlog_items is injected for the same
+    reason state_of is — so this whole function is assertable without a terminal or a subprocess."""
+    q = Queue()
+    for slug, title in backlog_items:
+        tid = "tl-" + slugify(slug)
+        spec = read_spec(os.path.join(data_dir, tid, "spec.md"))
+        has_meta = os.path.exists(os.path.join(state_dir, tid + ".meta"))
+        if spec is None:
+            q.items.append((slug, title, "", "backlog", 0, 0))
+            q.rows.append(QRow("backlog", slug, slug, "", "never grilled", title=title))
+            continue
+        opens = [x for x in spec.questions if x.state == "open"]
+        stage = spec.state or "drafted"
+        if not opens and not has_meta and stage != "rejected":
+            stage = "specified"
+        q.items.append((slug, title or spec.title, tid, stage, len(opens), len(spec.questions)))
+        if spec.state == "rejected":
+            continue        # terminal "don't build this" (D10) — decided, so it stops nagging
+        for x in opens:
+            q.rows.append(QRow("question", tid, slug, x.qid, "%s  %s" % (x.qid, x.text),
+                               title=title or spec.title, spec=spec))
+        if not opens and not has_meta:
+            q.rows.append(QRow("ready", tid, slug, "",
+                               "specified — %d answered, nothing dispatched" % len(spec.questions),
+                               title=title or spec.title, spec=spec))
+
+    by_slug = {}
+    for slug, title, tid, _stage, _o, _t in q.items:
+        if tid:
+            by_slug[tid] = (slug, title)
+
+    for r in build_fleet_model(state_dir, data_dir, state_of):
+        slug, title = by_slug.get(r.id, ("", ""))
+        spec = read_spec(os.path.join(data_dir, r.id, "spec.md"))
+        open_f = [f for f in r.findings if f.get("resolved") in (None, "fix")]
+        common = dict(slug=slug or r.id, title=title, fleet=r, spec=spec)
+        if open_f:
+            rules = ", ".join(sorted({f.get("rule", "?") for f in open_f}))
+            q.rows.append(QRow("gate", r.id, qid="", detail="%d finding%s: %s"
+                               % (len(open_f), "" if len(open_f) == 1 else "s", rules), **common))
+            continue
+        base = _base_state(r.state)
+        if base == "needs-decision":
+            ask = read_ask(os.path.join(data_dir, r.id, "ask")).get("question", "")
+            q.rows.append(QRow("decision", r.id, qid="",
+                               detail="worker asks: " + ask if ask else "worker needs a decision",
+                               **common))
+        elif base in ("blocked", "failed"):
+            q.rows.append(QRow(base, r.id, qid="", detail=r.state, **common))
+        elif base == "done":
+            q.rows.append(QRow("review", r.id, qid="",
+                               detail="%s report ready: approve, skip or fix" % r.kind, **common))
+        else:
+            q.quiet.append(r)     # working / paused — nothing needed, so it recedes to one line
+
+    q.rows.sort(key=lambda r: (r.rank, r.task, r.qid))
+    return q
+
+
 # --------------------------------------------------------------------------- selftest
 def _selftest():
     fail = []
@@ -159,7 +372,8 @@ def _selftest():
     runtime = {"tl-a": "done", "tl-b": "needs-decision", "tl-c": "working",
                "tl-e": "failed", "tl-f": "done", "tl-g": "paused",
                "tl-h": "paused:owner-review", "tl-i": "unknown"}
-    model = build_fleet_model(state_dir, data_dir, lambda i: runtime.get(i, "unknown"))
+    state_of = lambda i: runtime.get(i, "unknown")
+    model = build_fleet_model(state_dir, data_dir, state_of)
 
     ids = [r.id for r in model]
     check(ids == ["tl-a", "tl-b", "tl-e", "tl-f", "tl-g", "tl-h", "tl-c", "tl-i"],
@@ -184,6 +398,105 @@ def _selftest():
     check(build_fleet_model(state_dir + "-nope", data_dir, lambda i: "working") == [],
           "missing/empty state dir -> []")
 
+    # ---- the queue: backlog + specs + fleet, joined ----
+    def spec_file(tid, body):
+        os.makedirs(os.path.join(data_dir, tid), exist_ok=True)
+        with open(os.path.join(data_dir, tid, "spec.md"), "w") as fh:
+            fh.write(body)
+
+    # tl-a is dispatched AND has unresolved findings -> a gate row (and its spec is fully answered)
+    spec_file("tl-a", "---\nid: tl-a\nstate: specified\ntitle: A thing\n"
+                      "q: q1|decided|inferred|2026-08-14|use the existing index\n---\n# A thing\n")
+    # grilled, two open questions, never dispatched -> two question rows, no ready row
+    spec_file("tl-open", "---\nid: tl-open\nstate: drafted\ntitle: Open item\n"
+                         "q: q1|decided|inferred|2026-08-14|keep the old path\n"
+                         "q: q3|open|inferred|2026-08-14|what happens to the old index?\n"
+                         "q: q7|open|inferred|2026-08-14|who owns the migration?\n---\n")
+    # fully answered, never dispatched -> one ready row
+    spec_file("tl-ready", "---\nid: tl-ready\nstate: specified\ntitle: Ready item\n"
+                          "q: q1|decided|owner|2026-08-14|do it the simple way\n---\n")
+    # rejected -> no row at all (terminal decision), but still listed as an item
+    spec_file("tl-nope", "---\nid: tl-nope\nstate: rejected\ntitle: Rejected item\n"
+                         "q: q1|decided|owner|2026-08-14|no\n---\n")
+    os.makedirs(os.path.join(data_dir, "tl-b"), exist_ok=True)
+    with open(os.path.join(data_dir, "tl-b", "ask"), "w") as fh:
+        fh.write("question=reuse the retry helper?\ndefault=yes\ntimeout=30\n")
+
+    backlog = [("a", "A thing"), ("open", "Open item"), ("ready", "Ready item"),
+               ("nope", "Rejected item"), ("fresh", "Never grilled")]
+    q = build_queue_model(state_dir, data_dir, state_of, backlog)
+
+    whats = [(r.what, r.task, r.qid) for r in q.rows]
+    check(whats[0] == ("gate", "tl-a", ""), "gate must rank first, got %r" % (whats[:1],))
+    check([w for w in whats if w[0] == "question"]
+          == [("question", "tl-open", "q3"), ("question", "tl-open", "q7")],
+          "one row per OPEN question, in qid order: %r" % whats)
+    check(("ready", "tl-ready", "") in whats, "fully-answered + undispatched -> a ready row")
+    check(("backlog", "fresh", "") in whats, "un-grilled backlog item -> a backlog row")
+    check(not [w for w in whats if w[1] == "tl-nope"], "a rejected item must produce no row")
+    # The order is the design, so it is spelled out rather than derived from _QRANK — the two
+    # decisions TechLead exists to slow down (gate findings, grill questions) sit above everything,
+    # and un-grilled backlog items sink to the bottom.
+    check(whats == [("gate", "tl-a", ""), ("question", "tl-open", "q3"),
+                    ("question", "tl-open", "q7"), ("decision", "tl-b", ""),
+                    ("failed", "tl-e", ""), ("review", "tl-f", ""),
+                    ("ready", "tl-ready", ""), ("backlog", "fresh", "")],
+          "queue order wrong: %r" % (whats,))
+    dec = [r for r in q.rows if r.what == "decision"]
+    check(len(dec) == 1 and dec[0].detail == "worker asks: reuse the retry helper?",
+          "needs-decision row should quote data/<id>/ask: %r" % [r.detail for r in dec])
+    check(sorted(r.id for r in q.quiet) == ["tl-c", "tl-g", "tl-h", "tl-i"],
+          "working/paused/unknown recede into quiet: %r" % [r.id for r in q.quiet])
+    check(len({r.key for r in q.rows}) == len(q.rows), "row keys must be unique (the cursor uses them)")
+
+    items = {i[0]: i for i in q.items}
+    check(items["fresh"][3] == "backlog" and items["fresh"][2] == "", "never-grilled item stage")
+    check(items["open"][3] == "drafted" and items["open"][4] == 2, "open item: stage + open count")
+    check(items["ready"][3] == "specified" and items["ready"][4] == 0, "ready item: stage + 0 open")
+    check(items["nope"][3] == "rejected", "rejected item keeps its stage in the item list")
+    check(items["a"][2] == "tl-a", "slug -> id join is 'tl-' + slugify(slug)")
+
+    check(slugify("Add Search!") == "add-search", "slugify must mirror tl-grill's")
+    check(read_spec(os.path.join(data_dir, "nope", "spec.md")) is None, "missing spec -> None")
+    empty = build_queue_model(state_dir + "-nope", data_dir + "-nope", state_of, [])
+    check(empty.rows == [] and empty.quiet == [], "missing dirs + empty backlog -> empty queue")
+
+    # ---- view 3's tables (pure too: same fixture, no terminal) ----
+    lead_dir = os.path.join(tmp, "lead")
+    os.makedirs(lead_dir)
+    with open(os.path.join(lead_dir, "questions.md"), "w") as fh:
+        fh.write("# bank\n\n### what breaks that already works?\nhits: 4   last: 2026-08-14\n"
+                 "_scar:_ the 2024 reindex dropped 11k rows\n\n### who owns the rollback?\nhits: 0\n")
+    crumb, _hdr, mrows = modal_table("backlog", "", q, data_dir, lead_dir)
+    check(crumb == "techlead > backlog" and len(mrows) == 5,
+          "':backlog' lists every item incl. rejected + never-grilled: %d" % len(mrows))
+    _c, _h, mrows = modal_table("q", "open", q, data_dir, lead_dir)
+    targets = [r[1] for r in mrows]
+    check([(t.task, t.qid) for t in targets]
+          == [("tl-open", "q1"), ("tl-open", "q3"), ("tl-open", "q7")],
+          "':q <slug>' must list EVERY question — the answered ones are only reachable here: %r"
+          % [(t.task, t.qid) for t in targets])
+    # the accept-or-correct rule: an answered question seeds the prompt with its answer, an open
+    # one starts empty (spec.md's 5th field is the QUESTION while open — see seed_for).
+    check(targets[0].seed == "keep the old path", "answered question must seed the prompt with its answer")
+    check(targets[1].seed == "" and targets[2].seed == "", "an OPEN question must seed empty")
+    keys = {r.key for r in q.rows}
+    check(all("question|%s|%s" % (t.task, t.qid) in keys for t in targets[1:]),
+          "an open question's modal row must resolve to a real queue row (the cursor carries on it)")
+    check("question|tl-open|q1" not in keys,
+          "an ANSWERED question must have no queue row — it is not waiting on anyone")
+    _c, _h, mrows = modal_table("bank", "", q, data_dir, lead_dir)
+    check(len(mrows) == 2 and mrows[0][0].startswith("4  "),
+          "':bank' shows lead/questions.md with its hit counts: %r" % [r[0] for r in mrows])
+    _c, _h, mrows = modal_table("findings", "tl-a", q, data_dir, lead_dir)
+    check(len(mrows) == 3 and mrows[0][0].startswith("! "),
+          "':findings <id>' marks unresolved with '!': %r" % [r[0] for r in mrows])
+    _c, _h, mrows = modal_table("q", "not-a-thing", q, data_dir, lead_dir)
+    check(len(mrows) == 1 and mrows[0][1] is None, "':q' on an un-grilled slug says so, selects nothing")
+    _c, _h, mrows = modal_table("fleet", "", q, data_dir, lead_dir)
+    check(len(mrows) == len(q.quiet) + len([r for r in q.rows if r.fleet]),
+          "':fleet' shows every live task, loud ones first")
+
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
     if fail:
@@ -191,6 +504,8 @@ def _selftest():
             print("FAIL:", m)
         sys.exit(1)
     print("PASS: tl-top fleet model (priority order, exclusion, waiting-on)")
+    print("PASS: tl-top queue model (backlog+spec+fleet join, rank order, cursor keys)")
+    print("PASS: tl-top modal tables (backlog/q/bank/findings/fleet, keys resolve to queue rows)")
 
 
 # ----------------------------------------------------------------- instance + shell-outs
@@ -228,12 +543,32 @@ def _state_paths():
             os.environ.get("TL_DATA") or os.path.join(root, "data"))
 
 
+def _lead_path():
+    return os.environ.get("TL_LEAD") or os.path.join(_tl_root(), "lead")
+
+
+def _backlog_path():
+    return os.environ.get("TL_BACKLOG") or os.path.join(_state_paths()[1], "backlog.md")
+
+
 def _run_capture(argv):
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=10)
         return r.stdout
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def _run_cmd(argv):
+    """Run a tl-* command without leaving the TUI, for the ones that print a line and exit.
+    Returns (rc, last-meaningful-line). The command still owns the write and its refusals —
+    only the *presentation* differs from _shell_out's full-screen handoff."""
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, "could not run %s (%s)" % (os.path.basename(argv[0]), e)
+    out = [ln for ln in ((r.stdout or "") + (r.stderr or "")).splitlines() if ln.strip()]
+    return r.returncode, (out[-1] if out else "")
 
 
 def tl_state(tid):
@@ -255,10 +590,68 @@ def tl_spec_path(tid):
     return _run_capture([os.path.join(BIN, "tl-spec.sh"), "path", tid]).strip()
 
 
+def tl_backlog_list():
+    """[(slug, title)] — via tl-backlog, which owns the heading format (§3.1). Never our own awk."""
+    items = []
+    for ln in _run_capture([os.path.join(BIN, "tl-backlog.sh"), "list"]).splitlines():
+        slug, sep, title = ln.strip().partition(": ")
+        if sep and _ID_RE.match(slug):
+            items.append((slug, title))
+    return items
+
+
+def tl_backlog_show(slug):
+    """(line, title, body) for one item, or (0, '', '') — the read side of tl-backlog."""
+    if not _ID_RE.match(slug):
+        return 0, "", ""
+    out = _run_capture([os.path.join(BIN, "tl-backlog.sh"), "show", slug]).splitlines()
+    if not out:
+        return 0, "", ""
+    line, _, title = out[0].partition("\t")
+    try:
+        return int(line), title, "\n".join(out[1:]).strip()
+    except ValueError:
+        return 0, "", ""
+
+
+def read_bank(path):
+    """lead/questions.md -> [(question, hits, scar)]. The bank is the asset (§2.6), so `3 bank`
+    shows it with its hit counts; the file's shape is lead/SHAPE.md's."""
+    entries = []
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    cur = None
+    for ln in lines:
+        if ln.startswith("### "):
+            cur = [ln[4:].strip(), "0", ""]
+            entries.append(cur)
+        elif cur is not None and ln.startswith("hits:"):
+            cur[1] = ln[5:].split()[0] if ln[5:].split() else "0"
+        elif cur is not None and ln.startswith("_scar:_"):
+            cur[2] = ln[7:].strip()
+    return [tuple(e) for e in entries]
+
+
 # ----------------------------------------------------------------------------- curses UI
-import curses  # noqa: E402  (kept below the pure/testable core; --selftest never initscr's)
+import curses            # noqa: E402  (kept below the pure/testable core; --selftest never initscr's)
+import curses.textpad    # noqa: E402
 
 CP_LOUD, CP_STUCK, CP_READY, CP_QUIET = 1, 2, 3, 4
+
+# what -> (colour bucket, label). The bucket mirrors the fleet's: loud = act now, stuck = stuck,
+# ready = a deliverable is waiting, quiet = background.
+_WHAT_ATTR = {
+    "gate": "loud", "question": "loud", "decision": "loud",
+    "blocked": "stuck", "failed": "stuck",
+    "review": "ready", "ready": "ready",
+    "backlog": "stuck",
+}
+_ANSWER_KEYS = {ord("d"): "decided", ord("l"): "leaning", ord("s"): "spike"}
+_EDITORS_WITH_PLUS = {"vi", "vim", "nvim", "view", "nano", "pico", "emacs", "emacsclient",
+                      "kak", "hx", "helix", "micro"}
 
 
 def _interval_ms():
@@ -266,6 +659,18 @@ def _interval_ms():
         return max(200, int(float(os.environ.get("TL_TOP_INTERVAL", "2")) * 1000))
     except ValueError:
         return 2000
+
+
+def _bucket_attr(bucket, bold=True):
+    if not curses.has_colors():
+        return curses.A_BOLD if bucket in ("loud", "stuck") else curses.A_NORMAL
+    pair = {"loud": CP_LOUD, "stuck": CP_STUCK, "ready": CP_READY, "quiet": CP_QUIET}[bucket]
+    a = curses.color_pair(pair)
+    if bucket == "loud" and bold:
+        a |= curses.A_BOLD
+    if bucket == "quiet":
+        a |= curses.A_DIM
+    return a
 
 
 def _rank_attr(rank_val):
@@ -289,79 +694,295 @@ def _addln(win, y, x, s, attr=0):
             pass
 
 
-def _index_of(model, sid):
-    for i, r in enumerate(model):
-        if r.id == sid:
+def _bar(win, y, left, right="", attr=None):
+    """A full-width reverse-video bar — tl-top's header/footer idiom."""
+    h, w = win.getmaxyx()
+    pad = max(1, w - len(left) - len(right) - 1)
+    _addln(win, y, 0, (left + " " * pad + right).ljust(w),
+           (curses.A_REVERSE | curses.A_BOLD) if attr is None else attr)
+
+
+def _tabs(view):
+    return "".join(("[%d %s]" % (n, name)).ljust(13) if n == view
+                   else (" %d %s " % (n, name)).ljust(13)
+                   for n, name in ((1, "inbox"), (2, "briefing"), (3, "modal")))
+
+
+# ------------------------------------------------------------------------ view 1: inbox
+def _draw_inbox(win, st, q, data_dir):
+    h, w = win.getmaxyx()
+    rows = _filtered(q.rows, st["filter"])
+    _bar(win, 0, " " + _tabs(1),
+         "%d waiting · %d working " % (len(q.rows), len(q.quiet)))
+    _addln(win, 1, 0, "%-10s %-17s %s" % ("WHAT", "TASK", "DETAIL"), curses.A_UNDERLINE)
+    if not rows:
+        _addln(win, 3, 0, "  nothing is waiting on you." if not st["filter"]
+               else "  nothing matches /%s" % st["filter"])
+        _foot_inbox(win, st, q)
+        return
+
+    sel = _index_of(rows, st["cursor"])
+    body_h = max(3, (h - 5) // 2)
+    top = max(0, sel - body_h + 1) if sel >= body_h else 0
+    for i in range(top, min(len(rows), top + body_h)):
+        r = rows[i]
+        mark = "○" if r.what == "backlog" else "●"
+        line = "%s %-8s %-17s %s" % (mark, r.what[:8], (r.task or r.slug)[:17], r.detail)
+        attr = _bucket_attr(_WHAT_ATTR.get(r.what, "quiet"))
+        if i == sel:
+            attr = curses.A_REVERSE
+        _addln(win, 2 + (i - top), 0, line.ljust(w), attr)
+
+    y = 2 + min(len(rows) - top, body_h) + 1
+    y = _draw_detail(win, rows[sel], y, h - 2, data_dir)
+    if q.quiet and y < h - 2:
+        names = " · ".join("%s %s" % (r.id, r.state) for r in q.quiet[:4])
+        _addln(win, h - 2, 0, "quiet: %d working — %s" % (len(q.quiet), names),
+               _bucket_attr("quiet"))
+    _foot_inbox(win, st, q)
+
+
+def _foot_inbox(win, st, q):
+    h, _ = win.getmaxyx()
+    if st["notice"]:
+        _bar(win, h - 1, " " + st["notice"], " (any key) ")
+    else:
+        _bar(win, h - 1, " d/l/s answer   e edit   r run   g gate   p peek   / filter",
+             "? help   q quit ")
+
+
+def _draw_detail(win, r, y, ymax, data_dir):
+    """The pane under the inbox: what this row actually is, in the row's own terms."""
+    if y >= ymax:
+        return y
+    if r.what == "question":
+        qq = r.question
+        _addln(win, y, 0, "── %s · %s " % (r.qid, qq.text if qq else "") + "─" * 60,
+               _bucket_attr("quiet")); y += 1
+        if qq:
+            _addln(win, y, 0, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at)); y += 1
+        done = [x for x in (r.spec.questions if r.spec else []) if x.state != "open"]
+        if done and y < ymax:
+            _addln(win, y, 0, "decided here already: "
+                   + " · ".join("%s %s" % (x.qid, x.text) for x in done[:3])); y += 1
+    elif r.what == "gate":
+        _addln(win, y, 0, "── findings ─" + "─" * 60, _bucket_attr("quiet")); y += 1
+        for f in (r.fleet.findings if r.fleet else []):
+            if y >= ymax:
+                break
+            open_ = f.get("resolved") in (None, "fix")
+            _addln(win, y, 2, "%s [%s] %s: %s" % ("!" if open_ else "x", f.get("class", "?"),
+                                                  f.get("rule", "?"), f.get("detail", "")),
+                   curses.A_BOLD if open_ else curses.A_DIM)
+            y += 1
+    elif r.what == "backlog":
+        _addln(win, y, 0, "── %s ─" % r.title + "─" * 60, _bucket_attr("quiet")); y += 1
+        _, _, body = _backlog_cached(r.slug)
+        for ln in body.splitlines()[: max(0, ymax - y)]:
+            _addln(win, y, 2, ln); y += 1
+    else:
+        _addln(win, y, 0, "── %s ─" % r.task + "─" * 60, _bucket_attr("quiet")); y += 1
+        remaining = ymax - y
+        if remaining > 0 and r.fleet:
+            for ln in tl_peek(r.task, remaining).splitlines()[-remaining:]:
+                _addln(win, y, 2, ln); y += 1
+    return y
+
+
+# --------------------------------------------------------------------- view 2: briefing
+def _draw_briefing(win, st, q, data_dir):
+    h, w = win.getmaxyx()
+    rows = _filtered(q.rows, st["filter"])
+    _bar(win, 0, " " + _tabs(2), "%d of %d waiting " %
+         ((_index_of(rows, st["cursor"]) + 1) if rows else 0, len(rows)))
+    if not rows:
+        _addln(win, 3, 2, "nothing is waiting on you.")
+        _bar(win, h - 1, " 1 inbox   3 modal", "q quit ")
+        return
+    r = rows[_index_of(rows, st["cursor"])]
+    y = 2
+
+    label = {"gate": "GATE FINDINGS", "question": "OPEN QUESTION", "decision": "WORKER DECISION",
+             "review": "READY TO REVIEW", "ready": "SPEC READY", "backlog": "UN-GRILLED ITEM",
+             "blocked": "BLOCKED", "failed": "FAILED"}.get(r.what, r.what.upper())
+    _addln(win, y, 2, "%-24s %s" % (label, r.task or r.slug),
+           _bucket_attr(_WHAT_ATTR.get(r.what, "quiet"))); y += 2
+
+    qq = r.question
+    if qq:
+        for ln in _wrap(qq.text, w - 6):
+            _addln(win, y, 2, ln, curses.A_BOLD); y += 1
+        y += 1
+        _addln(win, y, 2, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at),
+               _bucket_attr("quiet")); y += 2
+    else:
+        for ln in _wrap(r.detail, w - 6):
+            _addln(win, y, 2, ln, curses.A_BOLD); y += 1
+        y += 1
+
+    if r.what == "gate" and r.fleet:
+        for f in r.fleet.findings:
+            if y >= h - 4:
+                break
+            open_ = f.get("resolved") in (None, "fix")
+            _addln(win, y, 5, "%s [%s] %s" % ("!" if open_ else "x", f.get("rule", "?"),
+                                              f.get("detail", "")),
+                   curses.A_BOLD if open_ else curses.A_DIM)
+            y += 1
+        y += 1
+
+    done = [x for x in (r.spec.questions if r.spec else []) if x.state != "open"]
+    if done and y < h - 5:
+        _addln(win, y, 2, "Already decided on this item:", _bucket_attr("quiet")); y += 1
+        for x in done:
+            if y >= h - 4:
+                break
+            _addln(win, y, 5, "%-4s %s" % (x.qid, x.text)); y += 1
+        y += 1
+
+    if r.slug and y < h - 4:
+        _, title, body = _backlog_cached(r.slug)
+        if title or body:
+            _addln(win, y, 2, "Backlog said:", _bucket_attr("quiet")); y += 1
+            for ln in _wrap(title + (" — " + body if body else ""), w - 8)[: max(0, h - 4 - y)]:
+                _addln(win, y, 5, ln); y += 1
+
+    _addln(win, h - 2, 0, "─" * (w - 1), _bucket_attr("quiet"))
+    if st["notice"]:
+        _bar(win, h - 1, " " + st["notice"], " (any key) ")
+    elif r.what == "question":
+        _bar(win, h - 1, " d decided   l leaning   s spike   x reject item   e edit",
+             "n next   q quit ")
+    else:
+        _bar(win, h - 1, " r run   g gate   p peek   e edit   x reject", "n next   q quit ")
+
+
+# ------------------------------------------------------------------------ view 3: modal
+def modal_table(view, arg, q, data_dir, lead_dir):
+    """(breadcrumb, header, [(line, target)]) for one `:` view. One renderer, so a new view later
+    costs one entry here.
+
+    `target` is None (nothing to act on) or a Target — and it is what makes view 3 more than a
+    read-only table: `:q <slug>` lists EVERY question, including the ones the grill already
+    inferred, so d/l/s can correct one. Those never appear in the inbox (they aren't waiting on
+    anyone), which is exactly why this is the place to reach them."""
+    if view == "backlog":
+        rows = [("%-16s %-11s %-5s %s" % (slug[:16], stage[:11],
+                                          ("%d/%d" % (o, t)) if t else "-", title[:36]),
+                 Target(tid or slug, "", "", slug))
+                for slug, title, tid, stage, o, t in q.items]
+        return "techlead > backlog", "%-16s %-11s %-5s %s" % ("SLUG", "STAGE", "OPEN", "TITLE"), rows
+    if view == "q":
+        tid = "tl-" + slugify(arg) if arg else ""
+        spec = read_spec(os.path.join(data_dir, tid, "spec.md")) if tid else None
+        if spec is None:
+            return "techlead > q > %s" % arg, "", [("no spec for '%s' — grill it first" % arg, None)]
+        rows = [("%-5s %-9s %-10s %s" % (x.qid, x.state, x.source, x.text),
+                 Target(tid, x.qid, seed_for(x), arg))
+                for x in spec.questions]
+        return ("techlead > q > %s" % arg, "%-5s %-9s %-10s %s" % ("QID", "STATE", "SOURCE", "ASKED"),
+                rows)
+    if view == "findings":
+        tid = arg if _ID_RE.match(arg or "") else ""
+        fs = read_findings(os.path.join(data_dir, tid, "findings.json")) if tid else []
+        rows = [("%-2s %-10s %-18s %s" % ("!" if f.get("resolved") in (None, "fix") else "x",
+                                          f.get("class", "?"), f.get("rule", "?"),
+                                          f.get("detail", "")),
+                 Target(tid, "", "", "")) for f in fs]
+        return ("techlead > findings > %s" % tid,
+                "%-2s %-10s %-18s %s" % ("", "CLASS", "RULE", "DETAIL"),
+                rows or [("no findings for '%s'" % tid, None)])
+    if view == "bank":
+        entries = read_bank(os.path.join(lead_dir, "questions.md"))
+        rows = [("%-5s %s" % (hits, question), None) for question, hits, _scar in entries]
+        return ("techlead > bank", "%-5s %s" % ("HITS", "QUESTION"),
+                rows or [("lead/questions.md is empty (#49) — the bank is the asset (§2.6)", None)])
+    # fleet (default)
+    rows = []
+    for r in sorted(q.quiet, key=lambda r: r.id):
+        rows.append(("%-17s %-7s %-14s %-12s %s" % (r.id[:17], r.kind[:7], r.state[:14],
+                                                    r.project[:12], r.waiting_on),
+                     Target(r.id, "", "", "")))
+    for r in q.rows:
+        if r.fleet:
+            f = r.fleet
+            rows.insert(0, ("%-17s %-7s %-14s %-12s %s" % (f.id[:17], f.kind[:7], f.state[:14],
+                                                           f.project[:12], f.waiting_on),
+                            Target(f.id, "", "", r.slug)))
+    return ("techlead > fleet",
+            "%-17s %-7s %-14s %-12s %s" % ("TASK", "KIND", "STATE", "PROJECT", "WAITING ON"),
+            rows or [("no active tasks — the fleet is idle.", None)])
+
+
+def _draw_modal(win, st, q, data_dir):
+    h, w = win.getmaxyx()
+    crumb, header, rows = _modal_view(st, q, data_dir)
+    _bar(win, 0, " " + _tabs(3), ":cmd  /filter  esc back ")
+    _addln(win, 1, 0, " " + crumb, _bucket_attr("quiet"))
+    if header:
+        _addln(win, 2, 0, " " + header, curses.A_UNDERLINE)
+    st["msel"] = max(0, min(st["msel"], len(rows) - 1)) if rows else 0
+
+    body_h = max(3, h - 9)
+    top = max(0, st["msel"] - body_h + 1) if st["msel"] >= body_h else 0
+    y = 3
+    for i in range(top, min(len(rows), top + body_h)):
+        attr = curses.A_REVERSE if i == st["msel"] else (
+            0 if rows[i][1] else _bucket_attr("quiet", bold=False))
+        _addln(win, y, 0, (" " + rows[i][0]).ljust(w), attr)
+        y += 1
+
+    y = min(y + 1, h - 5)
+    _addln(win, y, 0, "─" * (w - 1), _bucket_attr("quiet")); y += 1
+    _addln(win, y, 1, ":backlog   :q <slug>   :fleet   :findings <id>   :bank",
+           _bucket_attr("quiet")); y += 1
+    _addln(win, y, 1, "/text filters this table · enter opens the selected row in 2 briefing",
+           _bucket_attr("quiet"))
+    if st["notice"]:
+        _bar(win, h - 1, " " + st["notice"], " (any key) ")
+    else:
+        _bar(win, h - 1, " : command   / filter   enter briefing   d/l/s answer",
+             "%d rows   q quit " % len(rows))
+
+
+# ------------------------------------------------------------------------------ helpers
+def _wrap(s, width):
+    out, line = [], ""
+    for word in (s or "").split():
+        if line and len(line) + 1 + len(word) > width:
+            out.append(line)
+            line = word
+        else:
+            line = (line + " " + word).strip()
+    if line:
+        out.append(line)
+    return out or [""]
+
+
+def _filtered(rows, needle):
+    if not needle:
+        return rows
+    n = needle.lower()
+    return [r for r in rows
+            if n in (r.task + " " + r.slug + " " + r.what + " " + r.detail).lower()]
+
+
+def _index_of(rows, key):
+    for i, r in enumerate(rows):
+        if r.key == key:
             return i
     return 0
 
 
-def _footer(win):
-    h, w = win.getmaxyx()
-    _addln(win, h - 1, 0, ("  ↑/↓ move   enter detail   p peek   r run   g gate   q quit"
-                           "    (r/g confirm, then drop into the real command)").ljust(w),
-           curses.A_REVERSE)
+_BACKLOG_CACHE = {}
 
 
-def _draw(win, model, sel_idx, expanded, data_dir):
-    win.erase()
-    h, w = win.getmaxyx()
-    _addln(win, 0, 0, " tl-top — fleet (read-only; every action shells out to a tl-* command) ".ljust(w),
-           curses.A_BOLD | curses.A_REVERSE)
-    _addln(win, 1, 0, "%-16s %-7s %-14s %-12s %s" % ("TASK", "KIND", "STATE", "PROJECT", "WAITING ON"),
-           curses.A_UNDERLINE)
-    if not model:
-        _addln(win, 3, 0, "no active tasks — the fleet is idle.")
-        _footer(win)
-        win.noutrefresh()
-        curses.doupdate()
-        return
-
-    table_h = (h - 3) if not expanded else max(3, (h - 3) // 2)
-    top = max(0, sel_idx - table_h + 1) if sel_idx >= table_h else 0
-    for i in range(top, min(len(model), top + table_h)):
-        r = model[i]
-        line = "%-16s %-7s %-14s %-12s %s" % (
-            r.id[:16], r.kind[:7], r.state[:14], r.project[:12], r.waiting_on)
-        attr = _rank_attr(r.rank)
-        if i == sel_idx:
-            attr |= curses.A_REVERSE
-        _addln(win, 2 + (i - top), 0, line.ljust(w), attr)
-
-    if expanded:
-        _draw_detail(win, model[sel_idx], 2 + table_h, h, data_dir)
-    _footer(win)
-    win.noutrefresh()
-    curses.doupdate()
-
-
-def _draw_detail(win, row, y, h, data_dir):
-    _addln(win, y, 0, ("── detail: %s ──" % row.id).ljust(80), curses.A_BOLD)
-    y += 1
-    brief = os.path.join(data_dir, row.id, "brief.md")
-    _addln(win, y, 0, "spec:  " + (tl_spec_path(row.id) or "(none)")); y += 1
-    _addln(win, y, 0, "brief: " + brief + ("" if os.path.exists(brief) else "  (none)")); y += 1
-
-    if row.findings:
-        n_open = sum(1 for f in row.findings if f.get("resolved") in (None, "fix"))
-        _addln(win, y, 0, "findings (%d, %d open):" % (len(row.findings), n_open), curses.A_BOLD)
-        y += 1
-        for f in row.findings:
-            open_ = f.get("resolved") in (None, "fix")
-            mark = "!" if open_ else "x"
-            _addln(win, y, 2, "%s [%s] %s: %s"
-                   % (mark, f.get("class", "?"), f.get("rule", "?"), f.get("detail", "")),
-                   curses.A_BOLD if open_ else curses.A_DIM)
-            y += 1
-
-    if y < h - 2:
-        _addln(win, y, 0, "peek (snapshot, re-read each refresh):", curses.A_UNDERLINE)
-        y += 1
-        remaining = (h - 2) - y
-        if remaining > 0:
-            for ln in tl_peek(row.id, remaining).splitlines()[-remaining:]:
-                _addln(win, y, 2, ln)
-                y += 1
+def _backlog_cached(slug):
+    """tl-backlog show, memoised — the queue recomputes every 2s and the body only changes when
+    the owner edits it (which clears this)."""
+    if slug not in _BACKLOG_CACHE:
+        _BACKLOG_CACHE[slug] = tl_backlog_show(slug)
+    return _BACKLOG_CACHE[slug]
 
 
 def _suspend(win, fn):
@@ -381,11 +1002,10 @@ def _shell_out(win, argv):
             subprocess.call(argv)
         except OSError as e:
             print("\ntl-top: could not run %s (%s)" % (argv[0], e))
-            print("        (if this is tl-run, feat/tl-run may not be merged into this branch yet)")
-            try:
-                input("[enter to return] ")
-            except EOFError:
-                pass
+        try:
+            input("\n[enter to return] ")
+        except EOFError:
+            pass
     _suspend(win, go)
 
 
@@ -394,7 +1014,6 @@ def _peek_fullscreen(win, tid):
         return
 
     def go():
-        import shlex
         p1 = subprocess.Popen([os.path.join(BIN, "tl-peek.sh"), tid, "500"], stdout=subprocess.PIPE)
         try:
             pager = subprocess.Popen(shlex.split(os.environ.get("PAGER") or "less"), stdin=p1.stdout)
@@ -410,6 +1029,19 @@ def _peek_fullscreen(win, tid):
     _suspend(win, go)
 
 
+def _edit_file(win, path, line=0):
+    """$EDITOR, full-screen. The editor mutates the file; tl-top still never writes one itself."""
+    if not path:
+        return
+    ed = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    argv = shlex.split(ed)
+    if line and os.path.basename(argv[0]) in _EDITORS_WITH_PLUS:
+        argv.append("+%d" % line)
+    argv.append(path)
+    _suspend(win, lambda: subprocess.call(argv))
+    _BACKLOG_CACHE.clear()
+
+
 def _confirm(win, msg):
     """A deliberate two-step for consequences: press the key, then confirm. Never a bare keypress,
     and never a bulk 'approve all' — the real approve/skip/fix happens inside the shelled command."""
@@ -423,8 +1055,181 @@ def _confirm(win, msg):
     return ch in (ord("y"), ord("Y"))
 
 
+def _prompt(win, label, seed="", rows=3):
+    """The shared editable prompt (curses.textpad.Textbox: ^A/^E/^K/^U, arrows, wrapping).
+    Returns the text collapsed to ONE line, or None if cancelled with ESC.
+
+    Newlines are collapsed on purpose: tl-spec.sh stores each question as one pipe-encoded line,
+    so a literal newline would split the record. See _sanitise for the pipe."""
+    h, w = win.getmaxyx()
+    rows = max(1, min(rows, h - 3))
+    y0 = h - rows - 1
+    _bar(win, y0 - 1, " " + label, " enter commit · esc cancel · ^A/^E/^K edit ")
+    for y in range(y0, y0 + rows):
+        _addln(win, y, 0, " " * (w - 1))
+    win.noutrefresh()
+    curses.doupdate()
+
+    ed = curses.newwin(rows, w - 2, y0, 1)
+    ed.keypad(True)
+    if seed:
+        try:
+            ed.addstr(0, 0, seed[: rows * (w - 3)])
+        except curses.error:
+            pass
+    box = curses.textpad.Textbox(ed, insert_mode=True)
+    cancelled = []
+
+    def validate(ch):
+        if ch in (10, 13, curses.KEY_ENTER):
+            return 7                                    # Ctrl-G — terminate the edit
+        if ch == 27:                                    # ESC — cancel
+            cancelled.append(True)
+            return 7
+        if ch in (curses.KEY_BACKSPACE, 127, 8):
+            return 8                                    # make macOS delete behave
+        return ch
+
+    curses.curs_set(1)
+    try:
+        text = box.edit(validate)
+    finally:
+        curses.curs_set(0)
+    if cancelled:
+        return None
+    return " ".join(text.split())
+
+
+def _sanitise(text):
+    """spec.md question lines are pipe-encoded (tl-spec.sh qset), so a '|' in the answer would
+    truncate it on the next read. Replace rather than refuse mid-flow, and say so.
+    tl: the real fix is escaping in tl-spec.sh's encoder — that changes a durable file format,
+        so it belongs in a grill, not here."""
+    if "|" in text:
+        return text.replace("|", "/"), "'|' replaced with '/' — spec.md questions are pipe-encoded"
+    return text, ""
+
+
+def _help(win):
+    lines = [
+        "  1 / 2 / 3 / tab   switch view (inbox · briefing · modal)",
+        "  j k ↑ ↓           move the cursor (shared by all three views)",
+        "  d l s             answer decided / leaning / spike  → tl-grill answer",
+        "  x                 reject the item                   → tl-grill reject",
+        "  e                 edit the backlog item or the spec → $EDITOR",
+        "  n                 next waiting item",
+        "  r                 run / resume the pipeline         → tl-run   (confirm)",
+        "  g                 resolve the delivery gate         → tl-deliver (confirm)",
+        "  p                 peek the worker's output          → $PAGER",
+        "  / :               filter · command (view 3)",
+        "  ? q               this help · quit",
+        "",
+        "  tl-top renders, never mutates: every consequence runs the real tl-* command.",
+    ]
+    h, w = win.getmaxyx()
+    win.erase()
+    _bar(win, 0, " tl-top — keys", " any key to return ")
+    for i, ln in enumerate(lines):
+        _addln(win, 2 + i, 0, ln)
+    win.noutrefresh()
+    curses.doupdate()
+    win.timeout(-1)
+    win.getch()
+    win.timeout(_interval_ms())
+
+
+# --------------------------------------------------------------------------------- loop
+def _answer(win, target, state_word, context=""):
+    """d/l/s — prompt (seeded per seed_for), then hand the whole thing to tl-grill.
+    tl-top never writes spec.md (§3.5): the command owns the write, so its validation and its
+    correction log (inferred-outcomes.tsv) still fire. Captured rather than full-screen because
+    it is one non-interactive line of output — the decision path is unchanged either way."""
+    if not target or not target.qid:
+        return "d/l/s answers a grill question — this row isn't one (try 3 modal → :q <slug>)"
+    label = "answer %s [%s]" % (target.qid, state_word)
+    if context:
+        label += " · " + context
+    text = _prompt(win, label, target.seed)
+    if text is None:
+        return ""
+    if not text:
+        return "no answer written — nothing recorded"
+    text, notice = _sanitise(text)
+    rc, out = _run_cmd([os.path.join(BIN, "tl-grill.sh"), "answer",
+                        target.task, target.qid, state_word, text])
+    if rc != 0:
+        return "tl-grill refused: " + (out or "rc=%d" % rc)
+    return (notice + " · " if notice else "") + (out or "%s → %s" % (target.qid, state_word))
+
+
+def _reject(win, target):
+    if not target:
+        return ""
+    if not target.task.startswith("tl-"):
+        return "'%s' has no spec yet — grill it before rejecting" % target.slug
+    reason = _prompt(win, "reject %s — why?" % target.task, "", rows=2)
+    if reason is None:
+        return ""
+    if not reason:
+        return "reject needs a reason (D10: it is a terminal decision)"
+    reason, _ = _sanitise(reason)
+    rc, out = _run_cmd([os.path.join(BIN, "tl-grill.sh"), "reject", target.task, reason])
+    return out if rc == 0 else "tl-grill refused: " + (out or "rc=%d" % rc)
+
+
+def _command(win, st):
+    cmd = _prompt(win, ":", "", rows=1)
+    if not cmd:
+        return ""
+    parts = cmd.split()
+    verb, arg = parts[0].lstrip(":"), (parts[1] if len(parts) > 1 else "")
+    if verb in ("backlog", "fleet", "bank", "q", "findings"):
+        st["modal"] = (verb, arg)
+        st["msel"] = 0
+        return ""
+    return "unknown command ':%s' — try :backlog :q <slug> :fleet :findings <id> :bank" % verb
+
+
+def _target_path(target, data_dir):
+    """What `e` opens: the backlog file at this item's heading, or the spec it has grown into."""
+    if not target.task.startswith("tl-"):
+        line, _, _ = _backlog_cached(target.slug)
+        return _backlog_path(), line
+    return os.path.join(data_dir, target.task, "spec.md"), 0
+
+
+def _modal_view(st, q, data_dir):
+    """The current `:` table, filtered — one place, so the drawing and the keys can't disagree
+    about which row st['msel'] points at."""
+    crumb, header, rows = modal_table(*st["modal"], q, data_dir, _lead_path())
+    return crumb, header, [r for r in rows
+                           if not st["filter"] or st["filter"].lower() in r[0].lower()]
+
+
+def _msel_for(st, q, data_dir, sel):
+    """Landing in view 3 from the cursor: select the row that is the same decision, if present."""
+    for i, (_line, t) in enumerate(_modal_view(st, q, data_dir)[2]):
+        if t and t.task in (sel.task, sel.slug) and t.qid == sel.qid:
+            return i
+    return 0
+
+
+def _current_target(st, q, rows, data_dir):
+    """The one thing every action key acts on — resolved from whichever view has the focus."""
+    if st["view"] == 3:
+        mrows = _modal_view(st, q, data_dir)[2]
+        if mrows and 0 <= st["msel"] < len(mrows):
+            return mrows[st["msel"]][1]
+        return None
+    return rows[_index_of(rows, st["cursor"])].target if rows else None
+
+
 def _loop(win):
     curses.curs_set(0)
+    try:
+        curses.set_escdelay(25)         # ESC should cancel now, not in a second (py3.9+)
+    except AttributeError:
+        pass
     if curses.has_colors():
         curses.start_color()
         curses.use_default_colors()
@@ -434,43 +1239,108 @@ def _loop(win):
         curses.init_pair(CP_QUIET, curses.COLOR_CYAN, -1)
     win.timeout(_interval_ms())
     state_dir, data_dir = _state_paths()
-    model = build_fleet_model(state_dir, data_dir, tl_state)
-    selected_id = model[0].id if model else None
-    expanded = False
+
+    def recompute():
+        return build_queue_model(state_dir, data_dir, tl_state, tl_backlog_list())
+
+    q = recompute()
+    st = {"view": 1, "cursor": q.rows[0].key if q.rows else None,
+          "modal": ("fleet", ""), "msel": 0, "filter": "", "notice": ""}
 
     while True:
-        sel_idx = _index_of(model, selected_id)
-        selected_id = model[sel_idx].id if model else None
-        _draw(win, model, sel_idx, expanded, data_dir)
+        rows = _filtered(q.rows, st["filter"])
+        if rows and st["cursor"] not in {r.key for r in rows}:
+            st["cursor"] = rows[0].key
+        win.erase()
+        if st["view"] == 1:
+            _draw_inbox(win, st, q, data_dir)
+        elif st["view"] == 2:
+            _draw_briefing(win, st, q, data_dir)
+        else:
+            _draw_modal(win, st, q, data_dir)
+        win.noutrefresh()
+        curses.doupdate()
+
         try:
             ch = win.getch()
         except KeyboardInterrupt:
             return
-        if ch == -1:                                   # timer tick — recompute the fleet
-            model = build_fleet_model(state_dir, data_dir, tl_state)
+        if ch != -1 and st["notice"]:
+            st["notice"] = ""
+            if ch not in (ord("q"), ord("Q")):
+                continue                      # the dismissing keypress is not also an action
+
+        sel = rows[_index_of(rows, st["cursor"])] if rows else None
+        target = _current_target(st, q, rows, data_dir)
+
+        if ch == -1:
+            q = recompute()
         elif ch in (ord("q"), ord("Q")):
             return
-        elif ch in (curses.KEY_DOWN, ord("j")) and model:
-            selected_id = model[min(sel_idx + 1, len(model) - 1)].id
-        elif ch in (curses.KEY_UP, ord("k")) and model:
-            selected_id = model[max(sel_idx - 1, 0)].id
+        elif ch in (ord("1"), ord("2"), ord("3")):
+            was, st["view"] = st["view"], ch - ord("0")
+            if st["view"] == 3 and was != 3 and sel:
+                # the cursor carries: land on the table the selected decision lives in
+                st["modal"] = (("q", sel.slug) if sel.what == "question"
+                               else ("backlog", "") if sel.what == "backlog" else ("fleet", ""))
+                st["msel"] = _msel_for(st, q, data_dir, sel)
+        elif ch == ord("\t"):
+            st["view"] = st["view"] % 3 + 1
+        elif ch in (curses.KEY_DOWN, ord("j")):
+            if st["view"] == 3:
+                st["msel"] += 1
+            elif rows:
+                st["cursor"] = rows[min(_index_of(rows, st["cursor"]) + 1, len(rows) - 1)].key
+        elif ch in (curses.KEY_UP, ord("k")):
+            if st["view"] == 3:
+                st["msel"] = max(0, st["msel"] - 1)
+            elif rows:
+                st["cursor"] = rows[max(_index_of(rows, st["cursor"]) - 1, 0)].key
+        elif ch == ord("n") and rows:
+            st["cursor"] = rows[(_index_of(rows, st["cursor"]) + 1) % len(rows)].key
         elif ch in (curses.KEY_ENTER, 10, 13):
-            expanded = not expanded
-        elif ch == ord("p") and model:
-            _peek_fullscreen(win, model[sel_idx].id)
-        elif ch == ord("r") and model:
-            row = model[sel_idx]
-            slug = row.id[len("tl-"):] if row.id.startswith("tl-") else row.id
-            # tl: id->slug by stripping the tl- prefix (tl-run makes id = "tl-"+slug). Fine for
-            #     tl-run-born tasks; store slug in meta if directly-spawned ids ever need it.
+            if st["view"] == 3:
+                # only a row that is actually waiting on you has a briefing to open
+                want = "question|%s|%s" % (target.task, target.qid) if target else ""
+                if want in {r.key for r in q.rows}:
+                    st["cursor"], st["view"] = want, 2
+                elif target and any(r.task == target.task for r in q.rows):
+                    st["cursor"] = next(r.key for r in q.rows if r.task == target.task)
+                    st["view"] = 2
+                else:
+                    st["notice"] = "nothing is waiting on that row — d/l/s still works on it"
+            else:
+                st["view"] = 2 if st["view"] == 1 else 1
+        elif ch == ord("?"):
+            _help(win)
+        elif ch == ord("/"):
+            f = _prompt(win, "/", st["filter"], rows=1)
+            st["filter"] = f if f is not None else st["filter"]
+        elif ch == ord(":"):
+            st["view"] = 3
+            st["notice"] = _command(win, st)
+        elif ch in _ANSWER_KEYS:
+            ctx = (sel.detail if sel and st["view"] != 3 else "")
+            st["notice"] = _answer(win, target, _ANSWER_KEYS[ch], ctx)
+            q = recompute()
+        elif ch == ord("x") and target:
+            st["notice"] = _reject(win, target)
+            q = recompute()
+        elif ch == ord("e") and target:
+            path, line = _target_path(target, data_dir)
+            _edit_file(win, path, line)
+            q = recompute()
+        elif ch == ord("p") and target and target.task.startswith("tl-"):
+            _peek_fullscreen(win, target.task)
+        elif ch == ord("r") and target:
+            slug = target.slug or (target.task[3:] if target.task.startswith("tl-") else target.task)
             if _confirm(win, "Run pipeline: tl-run %s  (its own approve/reject prompts)" % slug):
                 _shell_out(win, [os.path.join(BIN, "tl-run.sh"), slug])
-            model = build_fleet_model(state_dir, data_dir, tl_state)
-        elif ch == ord("g") and model:
-            row = model[sel_idx]
-            if _confirm(win, "Resolve gate: tl-deliver %s  (gate prompts approve/skip/fix per finding)" % row.id):
-                _shell_out(win, [os.path.join(BIN, "tl-deliver.sh"), row.id])
-            model = build_fleet_model(state_dir, data_dir, tl_state)
+            q = recompute()
+        elif ch == ord("g") and target and target.task.startswith("tl-"):
+            if _confirm(win, "Resolve gate: tl-deliver %s  (approve/skip/fix per finding)" % target.task):
+                _shell_out(win, [os.path.join(BIN, "tl-deliver.sh"), target.task])
+            q = recompute()
 
 
 def run():

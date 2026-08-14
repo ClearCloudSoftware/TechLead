@@ -8,6 +8,27 @@ use (§4).
 
 ## [Unreleased]
 
+### Added
+
+- **`tl-top` shows the whole owner queue, and answers grill questions in place.** It built its model
+  from `state/*.meta` alone, so an item added to the backlog and never grilled — or grilled and
+  sitting on open questions — was structurally invisible: no `.meta` exists until spawn. The new
+  `build_queue_model` joins `backlog.md` + `spec.md` + the fleet into one row-per-thing-waiting-on-you,
+  with gate findings and open questions ranked above everything else.
+  - **Three views over one shared cursor** (`1`/`2`/`3`, `tab`): inbox, briefing (one decision
+    full-screen), and a `:command` view (`:backlog`, `:q <slug>`, `:fleet`, `:findings <id>`,
+    `:bank`). The cursor is `(task, qid)`, so switching re-frames rather than losing your place.
+  - **`d`/`l`/`s` answer, `x` rejects, `e` edits** — through a `curses.textpad` prompt that opens
+    seeded, so accepting an inferred answer is `d`+`enter`. Every one shells out to the real
+    `tl-grill answer` / `tl-grill reject` / `$EDITOR`: `tl-top` still renders and never mutates, so
+    the command's validation and its `inferred-outcomes.tsv` correction log still fire.
+  - Answered questions deliberately have **no inbox row** (nothing is waiting on them); `:q <slug>`
+    is where you reach one to correct it.
+  - `test/tl-top-views-smoke.sh` drives the real curses UI in a **pty** — the pure-model selftest
+    never executes a draw function, so a typo in a view used to surface only on the keypress.
+- **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader
+  doesn't grow a second copy of the heading awk (§3.1).
+
 ### Changed
 
 - **`tl-baseline`, `tl-scaffold-test`, `tl-scaffold-context` infer the project** from the current

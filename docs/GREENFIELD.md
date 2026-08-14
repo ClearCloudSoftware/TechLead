@@ -496,7 +496,7 @@ tl-watch.sh 10                # ten passes
 tl-state.sh tl-add-habit      # authoritative: working|blocked|needs-decision|done|failed
 tl-peek.sh  tl-add-habit 40   # last 40 lines of the worker's output
 tl-send.sh  tl-add-habit "use the existing arg parser"
-tl-top                        # live fleet dashboard; q to quit
+tl-top                        # live queue TUI: 1 inbox / 2 briefing / 3 modal; q to quit
 ```
 
 `tl-state` is the **only** correct way to read current state. `state/<id>.status` is an append-only
@@ -504,11 +504,14 @@ event log — its tail is the last *event*, not the current state. A worker that
 escalation leaves the tail reading `needs-decision` forever; `tl-state` reconciles it against process
 liveness and worktree mtime and correctly reports `working`.
 
-`tl-top` sorts stop-condition tasks (needs-decision, unresolved findings, blocked, failed) loud to
-the top, so a glance answers "who needs me". It renders and never mutates: `p` peeks, `r` runs
-`tl-run`, `g` runs `tl-deliver` — each behind a confirm, each dropping you into that command's own
-prompts. No bulk-approve, no single-keystroke merge. It is never load-bearing; killing it mid-action
-changes nothing.
+`tl-top` shows the whole owner queue, not just running workers: un-grilled backlog items and open
+grill questions get rows too, sorted loud to the top so a glance answers "who needs me". Three views
+share one cursor — `1` inbox (what's waiting), `2` briefing (one decision, full-screen), `3` modal
+(`:backlog`, `:q <slug>`, `:fleet`, `:bank`). It renders and never mutates: `d`/`l`/`s` answer a
+question through `tl-grill answer`, `x` rejects through `tl-grill reject`, `e` opens `$EDITOR`, `p`
+peeks, `r` runs `tl-run`, `g` runs `tl-deliver` — the last two behind a confirm, each dropping you
+into that command's own prompts. No bulk-approve, no single-keystroke merge. It is never
+load-bearing; killing it mid-action changes nothing.
 
 When a worker needs a decision it escalates in the terminal **with a stated default**. If you don't
 answer, the default fires and is logged — park, don't block. Owner silence is safe, never a deadlock.
@@ -694,7 +697,7 @@ All 41 scripts in `bin/`. Bold entries are the greenfield path.
 |---|---|
 | **`tl-spawn`** | dispatch one task into an isolated worktree on `tl/<id>` |
 | **`tl-watch`** | the zero-token supervisor; wakes only on actionable events |
-| `tl-top` | live read-only fleet dashboard; stop-conditions sorted loud |
+| `tl-top` | live read-only queue TUI (backlog + questions + fleet); answer questions in place |
 | **`tl-state`** | **the only** correct current-state read; reconciles the stale log tail |
 | `tl-status` | workers append one wake-worthy transition to the event log |
 | `tl-peek` | last N lines of a worker's output, non-invasively |

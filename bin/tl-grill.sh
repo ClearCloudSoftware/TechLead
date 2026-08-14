@@ -211,6 +211,13 @@ fi
 # seconds, so it runs under a spinner (tl_spin, which cannot show a pipe), and reading from a file
 # also takes the loop out of the pipe subshell — bank refs no longer need a temp file to escape it.
 drv="$(mktemp)"; brefs="$(mktemp)"
+# tl: two-tier bank read (SHAPE.md, owner 2026-08-14) — the grill should see the owner-global bank
+#   ($TL_HOME/lead/questions.md) concatenated BEFORE the per-project one, so `global ++ project`.
+# ponytail: single-tier read for now — no managed projects to merge with (data/projects/ empty), and
+#   when $TL_LEAD == $TL_HOME/lead the two are the same file. Upgrade path: when $TL_LEAD differs and
+#   its questions.md exists, write `cat $TL_HOME/lead/questions.md <project>/questions.md` to a temp
+#   and point TL_QUESTIONS at it (global first — the driver numbers entries in file order, and the
+#   bump_hits offset-split below relies on global occupying ordinals 1..G).
 export TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
        TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" TL_CONTEXT="$ctx"
 # Lenient on a non-zero driver, as the pipeline was: whatever it emitted is still parsed, and an
@@ -227,6 +234,10 @@ done < "$drv"
 rm -f "$bodyf" "$ctx" "$drv"
 # hits: bump — a bank question that justified an inferred answer this grill has fired (§2.6, SHAPE.md).
 # Reuse-rate is the risk-1 / D13 signal, so bump each referenced entry once and stamp its date.
+# ponytail: single-tier bump — refs index one file. Two-tier upgrade (paired with the merged read
+#   above): with G = `grep -c '^### ' $TL_HOME/lead/questions.md`, split refs by offset —
+#   bump_hits global-file <refs ≤ G>; bump_hits project-file <(refs > G) each minus G>. bump_hits
+#   ignores out-of-range ordinals, so a global ref firing in X lands in the global file, not X's.
 if [ -s "$brefs" ]; then bump_hits "$TL_LEAD/questions.md" $(sort -un "$brefs"); fi
 rm -f "$brefs"
 "$BIN/tl-metric.sh" record "$id" grill "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)

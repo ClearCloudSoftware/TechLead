@@ -57,6 +57,18 @@ hits: 0   last: —          # per-rule reuse counter (E6.3/D4) — bump when th
   "the question bank is the asset, not the answers"). One question per line/heading, same `hits:`
   counter. The grill's inference pass reads this file; a worker escalation that should've been asked
   at spec time gets added here (§2.5 second loop).
+
+  **Two-tier (owner decision 2026-08-14).** The bank is scoped in two layers: an **owner-global**
+  bank at `TL_HOME/lead/questions.md` (priors that cross every project) and a **per-project** bank at
+  `<project>/.techlead/lead/questions.md` (questions that don't leave that repo). A grill inside
+  project X sees **both, concatenated global-first** (`global ++ X`) — not "nearest wins", which would
+  shadow the global priors. Project banks stay isolated from each other; only the global tier travels.
+  Seeding (#49) therefore fills the global tier from cross-cutting scars and each project tier from its
+  own. *The merge is not built yet* — there are no managed projects to merge with (`data/projects/` is
+  empty), so today's single-tier read is correct. When the first project grows a local question, the
+  read becomes `global ++ project` and the `hits:` write splits back per tier by ordinal offset (a
+  global entry firing in X bumps the global file, not X's). See the `# ponytail:` markers in
+  `bin/tl-grill.sh` for the two exact sites.
 - **`voice.md`** — prose, but still shaped: a short ladder of do/don't with examples, not adjectives.
 - **`decisions/`** — one ADR per decision, following `decisions/TEMPLATE.md`. Ground truth for the
   grill's inference pass.

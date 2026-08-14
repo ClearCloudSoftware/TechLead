@@ -133,6 +133,12 @@ tl-project.sh set myapp danger_paths "migrations/** billing/**"
 tl-baseline.sh myapp        # runs test_command, records the known-failing set
 ```
 
+**Greenfield with no test runner to detect?** `tl-scaffold-test myapp` drafts a `test.sh` from the
+backlog (failing-id-per-line contract) and sets `test_command` for you — then stops. **Review the
+draft** (a test defines what "done" means, so it's yours to approve), commit it, and `tl-baseline`.
+It never baselines an unreviewed harness and never overwrites an existing `test.sh`. Existing repos
+with a known stack don't need it — `tl-onboard`/`tl-detect` already set `test_command`.
+
 > **Commit the test harness first.** `test_command` runs in the *worktree*, which a worker branches
 > from `HEAD` — so an **uncommitted** harness (or fixtures) is invisible to workers and to the gate,
 > and the baseline (run against your working tree) won't match what the gate reruns. `tl-baseline` and

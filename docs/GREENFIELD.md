@@ -11,26 +11,27 @@ Substitute your own app — the shape doesn't change.
 
 ---
 
-## The seven commands
+## The short path
 
 Everything below is elaboration on this:
 
 ```sh
-tl-init.sh                                        # 1. once per machine
-tl-new.sh habit && cd habit                       # 2. create + register the project
-#    …write test.sh, commit it…                   # 3. define "correct" (the only writing you do)
-tl-project.sh set habit test_command "sh test.sh"
-tl-baseline.sh habit                              # 4. survey → ready
-#    …append a backlog item…                      # 5.
-tl-run.sh add-habit                               # 6. → STOPS: curate the question bank
-tl-grill.sh promote add-habit                     #    (owner-only decision)
-tl-run.sh add-habit                               # 7. grill → brief → spawn
-tl-watch.sh                                       #    zero-token supervision
-tl-run.sh add-habit                               #    resume → gate → merged
+tl-init.sh                          # 1. once per machine
+tl-new.sh habit && cd habit         # 2. create + register the project
+#   …append a backlog item…         # 3. what to build
+tl-scaffold-test.sh habit           # 4. drafts test.sh + sets test_command, then stops
+#   …review it, commit it…          #    ← STOP: what "correct" means is yours to approve
+tl-baseline.sh habit                # 5. survey → ready
+tl-run.sh add-habit                 # 6. ← STOP: curate the question bank
+tl-grill.sh promote add-habit
+tl-run.sh add-habit                 # 7. grill → brief → spawn
+tl-watch.sh                         #    zero-token supervision
+tl-run.sh add-habit                 # 8. resume → gate → merged
 ```
 
-Three of those are **stops**, not steps: TechLead deliberately hands you the question bank, the
-open grill questions, and the gate findings. Those are the product. Everything else is transport.
+Seven distinct commands. Four of the moments above are **stops**, not steps: TechLead hands you the
+test harness, the question bank, any open grill questions, and the gate findings, and refuses to
+decide them itself. Those four are the product. Everything else is transport.
 
 ---
 
@@ -82,8 +83,8 @@ silently, so an unset one costs you the feature, never correctness:
 |---|---|
 | `TL_WORKER_CMD` | the coding worker itself |
 | `TL_GRILL_CMD` | the grill's inference pass over your question bank |
-| `TL_GRILL_PROPOSE_CMD` | auto-drafting candidate questions at the empty-bank stop (Step 5) |
-| `TL_SCAFFOLD_TEST_CMD` | `tl-scaffold-test` drafting a `test.sh` from your backlog (Step 3) |
+| `TL_GRILL_PROPOSE_CMD` | auto-drafting candidate questions at the empty-bank stop (Step 6) |
+| `TL_SCAFFOLD_TEST_CMD` | `tl-scaffold-test` drafting a `test.sh` from your backlog (Step 4) |
 | `TL_SPECDIFF_CMD` | the Spec axis — *did the change do what the spec decided?* Folds into **every change gate**, and into `tl-review` |
 | `TL_STANDARDS_CMD` | the Standards axis (advisory craft review), `tl-review` only |
 | `TL_ANSWER_CMD` | the `answer` kind (`tl-answer "why did we…"`) |
@@ -94,8 +95,8 @@ judge **silently skips it** — the gate would check tests, scope, and paths but
 
 **Using opencode instead?** `tl-init` writes the two opencode adapters and prompts for
 `TL_OPENCODE_MODEL` (must support tool-calling; `ollama/qwen3-coder:30b` is the validated local
-pick). The other five have no opencode adapter yet, so they stay unset: Step 3 means writing
-`test.sh` by hand, Step 5 means seeding `lead/questions.md` by hand, and the gate runs without the
+pick). The other five have no opencode adapter yet, so they stay unset: Step 4 means writing
+`test.sh` by hand, Step 6 means seeding `lead/questions.md` by hand, and the gate runs without the
 Spec axis.
 </details>
 
@@ -141,7 +142,7 @@ readiness=survey         # ← no tests exist, so: plan tasks only
 ```
 
 `readiness=survey` is the important one. A repo with no tests has no completion criterion, so
-TechLead refuses to let a worker *change* it. Step 4 lifts that.
+TechLead refuses to let a worker *change* it. Step 5 lifts that.
 
 <details>
 <summary><b>Finer grain</b> — the manual registration, and the brownfield path</summary>
@@ -174,17 +175,88 @@ To create every project under a fixed directory instead of `$PWD`, export `TL_PR
 
 ---
 
-## Step 3 — write `test.sh` (the one thing only you can do)
+## Step 3 — the first backlog item
+
+The backlog is plain markdown, one item per `## <slug>: <title>` heading. Write it now — it is both
+what you're about to build and what Step 4's harness gets drafted from:
+
+```sh
+cat >> .techlead/data/backlog.md <<'EOF'
+
+## add-habit: Add a habit to the list
+`habit add <name>` appends <name> to $HABITS (default ./habits.txt), one per line, prints nothing.
+`habit list` prints the file. Missing <name> → usage message on stderr, non-zero exit.
+EOF
+```
+
+Be specific about *observable* behaviour — file paths, exit codes, what lands on stderr. The grill
+interrogates this text and the scaffolder turns it into assertions, so vagueness here becomes
+vagueness in both.
+
+---
+
+## Step 4 — draft the test harness, then approve it
 
 This is the contract that makes everything else mechanical:
 
 > **`test_command` prints one failing-test identifier per line. Silence means green.**
 
-That's it. No framework, no exit-code convention. The gate does set arithmetic on those lines
-against a recorded baseline, so anything that can `echo` an id works.
+No framework, no exit-code convention. The gate does set arithmetic on those lines against a
+recorded baseline, so anything that can `echo` an id works.
 
-Write it *before* the app exists — the ids describe behaviours you want, all of them currently
-broken:
+`tl-scaffold-test` drafts one from the backlog item you just wrote:
+
+```sh
+tl-scaffold-test.sh habit
+```
+
+```
+tl: scaffold-test: drafting a harness for 'habit' from its backlog (calling scaffolder)…
+tl: drafted /Users/you/projects/habit/test.sh  and set test_command='sh test.sh'.
+tl: REVIEW it — a test defines what 'done' means, which is yours to approve. Then, in order:
+      $EDITOR test.sh
+      git add test.sh && git commit -m 'add test harness'
+      tl-baseline habit
+```
+
+It writes `test.sh`, sets `test_command`, and **stops**. It never baselines, never promotes, and
+refuses to overwrite an existing `test.sh`.
+
+**Now read every line of it.** This is a stop, not a formality. The harness *is* your definition of
+"correct", and every gate from here to the end of the project measures against it — a draft you
+skimmed is a standard you didn't choose. Expect to edit it: the scaffolder infers assertions from
+prose, and prose is lossy.
+
+Two things worth checking hardest:
+
+1. **Does each id name a behaviour you actually want?** The ids are the vocabulary the gate reports
+   in for the life of the project. `add-appends` tells you something at 2am; `test_3` doesn't.
+2. **Can a check pass for the wrong reason?** This is the subtle one. Asserting that
+   `./habit add` *exits non-zero* looks like a fine test of "missing argument is an error" — but
+   "command not found" is also a non-zero exit, so that check reports **passing** while the app
+   doesn't exist at all. Assert on something only the real implementation can produce (here: that
+   the message contains `usage`). A false green costs you most at exactly the moment you have the
+   least evidence.
+
+Then commit:
+
+```sh
+git add test.sh .gitignore && git commit -m "test: behaviour harness for habit"
+```
+
+**Committing matters more than it looks.** A worker gets an isolated worktree branched from `HEAD`,
+and the gate runs there too — so an uncommitted harness is invisible to both, and a baseline captured
+against your working tree would measure something neither ever sees. `tl-baseline` and `tl-spawn`
+both warn on a dirty tree for this reason. Since #105 the gate also fails closed on it: a
+`test_command` that exits non-zero and prints nothing raises `test-harness-unrunnable` and blocks,
+rather than reading as "zero failures" and merging anything.
+
+<details>
+<summary><b>Finer grain</b> — writing it by hand instead</summary>
+
+The scaffolder is convenience, not a dependency — it needs `TL_SCAFFOLD_TEST_CMD` (unset on the
+opencode harness), and a blank file is often faster for something this small. Anything satisfying the
+contract works:
 
 ```sh
 cat > test.sh <<'EOF'
@@ -203,62 +275,25 @@ grep -qx 'read' "$HABITS" 2>/dev/null || fail add-appends
 
 ./habit add 2>&1 >/dev/null | grep -q usage || fail add-requires-name
 
-exit 0        # the ids on stdout are the result; the exit code is ignored
+exit 0        # ids on stdout are the result; a clean run must exit 0 (see #105)
 EOF
 chmod +x test.sh
+tl-project.sh set habit test_command "sh test.sh"
 ```
 
-Note the third check asserts on the *message*, not on the exit code. `./habit add` exiting non-zero
-is also what "command not found" looks like, so an exit-code check would report that behaviour as
-**passing** while the app doesn't exist yet — a false green, precisely when you can least afford one.
-Assert on something only the real implementation can produce.
+Written before the app exists, this prints all three ids — which is exactly what you want the
+baseline to record.
 
-**Commit it. This matters more than it looks.**
-
-```sh
-git add test.sh .gitignore && git commit -m "test: behaviour harness for habit"
-```
-
-A worker gets an isolated worktree branched from `HEAD`. An uncommitted harness is **invisible** to
-it *and* to the gate — and your baseline, captured against the working tree, would then measure
-something neither ever sees. `tl-baseline` and `tl-spawn` both warn on a dirty tree for exactly this
-reason. Take the warning seriously.
-
-<details>
-<summary><b>Finer grain</b> — let TechLead draft the harness (<code>tl-scaffold-test</code>)</summary>
-
-If you'd rather not start from a blank file, `tl-scaffold-test` drafts one *from your backlog*. That
-means writing the backlog item first — so you'd do Step 5's `cat >>` before this, then:
-
-```sh
-tl-scaffold-test.sh habit
-```
-
-```
-tl: drafted /Users/you/projects/habit/test.sh  and set test_command='sh test.sh'.
-tl: REVIEW it — a test defines what 'done' means, which is yours to approve. Then, in order:
-      $EDITOR test.sh
-      git add test.sh && git commit -m 'add test harness'
-      tl-baseline habit
-```
-
-It writes `test.sh`, sets `test_command`, and **stops**. It never baselines for you and never
-overwrites an existing `test.sh` — what "done" means is the one thing it won't decide.
-
-Read every line before committing. A harness you didn't read is a definition of "correct" you didn't
-choose, and every gate from here on is measured against it. This is the same trap as rubber-stamping
-the question bank in Step 5, one layer down.
-
-Existing repo with a real test runner? You don't need this — `tl-detect` / `tl-onboard` already set
-`test_command` from the stack they found.
+**Existing repo with a real test runner?** You need none of this. `tl-detect` / `tl-onboard` set
+`test_command` from the stack they find; your job is only to make it emit one id per failing test
+instead of a summary line.
 </details>
 
 ---
 
-## Step 4 — baseline, and the promotion to `ready`
+## Step 5 — baseline, and the promotion to `ready`
 
 ```sh
-tl-project.sh set habit test_command "sh test.sh"
 tl-baseline.sh habit
 ```
 
@@ -287,27 +322,20 @@ already-`ready` project leaves its readiness alone.
 
 You can pin kind per task regardless: `tl-spec.sh set tl-add-habit kind plan`.
 
-**The plan-first alternative.** If you'd rather not hand-write `test.sh`, leave the project at
-`survey` and dispatch a `plan` task ("propose a structure and a test harness for a habit CLI").
-You get `report.md` to read and approve with `tl-approve.sh` — no code is touched. Then you write
-the harness from its proposal and baseline as above. Slower, and it costs tokens for something you
-can usually type faster than you can review. The direct path above is the recommended one.
+**The plan-first alternative.** For a bigger unknown than a habit tracker, leave the project at
+`survey` and dispatch a `plan` task ("propose a structure and a test harness for X"). You get
+`report.md` to read and approve with `tl-approve.sh` — no code is touched — then build the harness
+from its proposal and baseline as above. Slower and it costs tokens, so it earns its keep only when
+you genuinely don't know the shape yet; `tl-scaffold-test` covers the ordinary case.
 </details>
 
 ---
 
-## Step 5 — the first feature, and the empty question bank
+## Step 6 — the first run, and the empty question bank
 
-The backlog is plain markdown, one item per `## <slug>: <title>` heading:
+The project is `ready` and the backlog item is written, so dispatch it:
 
 ```sh
-cat >> .techlead/data/backlog.md <<'EOF'
-
-## add-habit: Add a habit to the list
-`habit add <name>` appends <name> to $HABITS (default ./habits.txt), one per line, prints nothing.
-`habit list` prints the file. Missing <name> → usage message on stderr, non-zero exit.
-EOF
-
 tl-run.sh add-habit
 ```
 
@@ -379,7 +407,7 @@ judgment**, including mine.
 
 ---
 
-## Step 6 — grill, brief, spawn
+## Step 7 — grill, brief, spawn
 
 ```sh
 tl-run.sh add-habit
@@ -453,7 +481,7 @@ tl-spawn.sh --id af1 --project /abs/path/habit --project-name habit --kind chang
 
 ---
 
-## Step 7 — supervise
+## Step 8 — supervise
 
 ```sh
 tl-watch.sh          # runs until Ctrl-C; wakes you only on actionable events
@@ -487,7 +515,7 @@ answer, the default fires and is logged — park, don't block. Owner silence is 
 
 ---
 
-## Step 8 — gate and deliver
+## Step 9 — gate and deliver
 
 Once `tl-state` says `done`:
 
@@ -511,9 +539,16 @@ It checks four things:
 | Rule | Fires when |
 |---|---|
 | `test-regression` | a test fails now that wasn't failing at baseline |
+| `test-harness-unrunnable` | `test_command` exited non-zero **and** printed nothing — the harness itself couldn't run |
 | `scope-cap-exceeded` | more files changed than `max_files_changed` |
 | `danger-path` | the change touched a `danger_paths` glob |
 | `tl-shortcut-danger` / `-malformed` | a `# tl:` shortcut on a danger path, or one naming no upgrade path |
+
+`test-harness-unrunnable` is the one that reads like plumbing and isn't. Before #105 the gate piped
+the test command into `sort`, so the pipeline's exit status was `sort`'s — a harness that couldn't
+run (missing `test.sh`, broken runner) produced no output and was read as *zero failures*, merging
+anything. It now fails closed. A well-behaved harness prints ids to stdout and exits 0, so a clean
+run is unaffected.
 
 Plus `spec-*` findings when `TL_SPECDIFF_CMD` is set — the Spec axis, checking the diff against the
 spec's `decided` answers.
@@ -730,7 +765,8 @@ All seven are written by `tl-init` for the `claude` harness; `opencode` gets the
 
 1. **Uncommitted test harness.** Workers branch from `HEAD`; the gate runs there too. Anything
    uncommitted is invisible to both, and your baseline then measures something neither sees. Commit
-   before you dispatch. Both `tl-baseline` and `tl-spawn` warn — don't scroll past it.
+   before you dispatch. `tl-baseline` and `tl-spawn` warn, and the gate now raises
+   `test-harness-unrunnable` rather than reading a harness that can't run as "zero failures".
 2. **`test_command` must print ids, not a summary.** `make test` printing "3 failed" gives the gate
    nothing to diff. Wrap your runner so it emits one identifier per failing test.
 3. **`cd` selects the project.** Commands resolve the nearest ancestor `.techlead/`. Run `tl-run`
@@ -738,6 +774,8 @@ All seven are written by `tl-init` for the `claude` harness; `opencode` gets the
 4. **`lead/` is yours alone.** The LLM proposes; you promote. Never let an agent write into
    `lead/questions.md` or `lead/principles.md` — a bank of borrowed judgment captures nobody, and
    capturing *you* is the entire bet.
-5. **The stops are the feature.** If you find yourself reflexively hitting enter through the gate
-   findings and pruning nothing from the question bank, you've turned TechLead into an expensive
-   `git merge`. The value is concentrated entirely in the three places it refuses to decide for you.
+5. **The stops are the feature.** Committing a scaffolded `test.sh` you skimmed, pruning nothing from
+   the question bank, hitting enter through the gate findings — do all three and you've turned
+   TechLead into an expensive `git merge`. The value is concentrated entirely in the four places it
+   refuses to decide for you, and the harness is the earliest and cheapest of them to get wrong: it
+   silently defines "correct" for every gate that follows.

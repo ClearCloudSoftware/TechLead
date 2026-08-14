@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# tl-kickoff.sh — persist the CONTEXT.md an ideation/brainstorm produced for a GREENFIELD project
-# (E9.2 follow-up, #60). The interview itself happens in the operator's chat (the techlead skill,
-# which may lean on the brainstorming skill) — NOT here: no LLM in the supervision loop. This is the
-# deterministic persist step. It reads the composed CONTEXT.md on stdin, refuses to overwrite an
-# existing one, writes it UNCOMMITTED (the domain is the owner's to approve), and prints the review +
-# seed-backlog next steps. For a BROWNFIELD repo, tl-scaffold-context derives CONTEXT.md from the code.
+# tl-kickoff.sh — greenfield project ideation as a TERMINAL interview (E9.2, #60). A brand-new repo has
+# no domain to derive, so it comes from the owner — but entirely from the shell, no Claude Code app.
+#
+# Each turn is a discrete `claude -p` call (no LLM in the supervision loop, §3.5), and the running
+# conversation lives in a transcript FILE — killable/reconstructable (§3.2): kill it mid-interview and
+# re-run to resume. A plain transcript (not claude session files) keeps it harness-agnostic (§5) and
+# owned by TechLead (§3.1). When the lead has enough it emits the CONTEXT.md (domain glossary) + a seed
+# backlog; both land draft-then-approve — CONTEXT.md written uncommitted (owner reviews+commits), the
+# backlog printed as ready `tl-backlog add` lines (owner curates). Existing repo → tl-scaffold-context.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
-# <project> is optional: run from inside the project and it defaults to the one registered there.
+
+# <project> optional: default to the sole project registered in the current .techlead.
 name="${1:-}"
 if [ -z "$name" ]; then
   name="$(tl_current_project)" || tl_die "run from inside a project (or pass its name). Registered here: $(ls "$TL_DATA/projects" 2>/dev/null | sed 's/\.conf$//' | tr '\n' ' ')"
@@ -16,19 +20,43 @@ path="$("$BIN/tl-project.sh" get "$name" path)" || tl_die "unknown project: $nam
 target="$path/CONTEXT.md"
 if [ -e "$target" ]; then tl_die "$target already exists — edit it by hand (refusing to overwrite)"; fi
 
-# stdin must be piped content, not a terminal — otherwise `cat` blocks silently and looks hung. The
-# interview isn't this command's job (it runs in the techlead skill's chat); this only persists.
-if [ -t 0 ]; then
-  tl_die "nothing piped in. tl-kickoff persists a composed CONTEXT.md from stdin — it does NOT run the
-  interview. Ideate via the techlead skill (in chat), or persist by hand:
-      printf '# CONTEXT.md\\n...\\n' | tl-kickoff${1:+ }${1:-}"
-fi
-content="$(cat)"   # the composed CONTEXT.md, piped in from the ideation
-[ -n "$content" ] || tl_die "no CONTEXT.md content on stdin — compose it from the ideation, then pipe it in"
-printf '%s\n' "$content" > "$target"
+cmd="${TL_KICKOFF_CMD:-$TL_HOME/adapters/claude-kickoff.sh}"
+[ -x "$cmd" ] || tl_die "no kickoff driver — set TL_KICKOFF_CMD (e.g. adapters/claude-kickoff.sh), or write $target by hand"
 
-echo "tl: wrote $target (uncommitted)."
-echo "tl: REVIEW it — it's your project's domain, yours to approve. Then commit so the grill/review/answer read it:"
-echo "      git -C \"$path\" add CONTEXT.md && git -C \"$path\" commit -m 'add CONTEXT.md'"
-echo "tl: then seed the backlog from the ideation (one per behaviour):"
-echo "      tl-backlog add <slug> \"<title>\" [description]"
+transcript="$TL_DATA/kickoff-$name.transcript"; mkdir -p "$TL_DATA"
+if [ -f "$transcript" ]; then tl_log "resuming the kickoff interview for '$name'"
+else printf 'PROJECT: %s\n(no answers yet — ask your first question)\n' "$name" > "$transcript"; fi
+
+echo "tl: kickoff interview for '$name' — the lead asks one question at a time; answer each." >&2
+echo "tl: (blank line + Enter, or Ctrl-D, pauses — re-run tl-kickoff to resume from where you left off.)" >&2
+
+max="${TL_KICKOFF_MAX:-10}"; turn=0
+while :; do
+  turn=$((turn+1))
+  [ "$turn" -le "$max" ] || { tl_log "hit the question cap ($max) — re-run to continue if it didn't wrap up"; exit 0; }
+  out="$("$cmd" < "$transcript")" || tl_die "kickoff driver failed"
+  case "$out" in
+    *"<CONTEXT>"*)   # the lead is done: extract the docs
+      ctx="$(printf '%s\n' "$out" | awk '/<CONTEXT>/{f=1;next} /<\/CONTEXT>/{f=0} f')"
+      backlog="$(printf '%s\n' "$out" | awk '/<BACKLOG>/{f=1;next} /<\/BACKLOG>/{f=0} f')"
+      [ -n "$ctx" ] || tl_die "driver emitted no CONTEXT body — paused; re-run tl-kickoff $name to continue"
+      printf '%s\n' "$ctx" > "$target"; rm -f "$transcript"
+      echo "" >&2
+      echo "tl: drafted $target (uncommitted). REVIEW it — the domain is yours to approve — then commit:" >&2
+      echo "      git -C \"$path\" add CONTEXT.md && git -C \"$path\" commit -m 'add CONTEXT.md'" >&2
+      if [ -n "$backlog" ]; then
+        echo "tl: seed backlog — run the ones you want:" >&2
+        printf '%s\n' "$backlog" | while IFS='|' read -r slug title desc; do
+          [ -n "$slug" ] || continue
+          printf '      tl-backlog add %s %s %s\n' "$slug" "$(printf %q "$title")" "$(printf %q "$desc")" >&2
+        done
+      fi
+      exit 0 ;;
+    *)               # a question (it streamed to the terminal as it generated); record + capture answer
+      printf 'LEAD: %s\n' "$out" >> "$transcript"
+      printf '\n> ' >&2
+      IFS= read -r ans || { echo >&2; tl_log "paused — resume with: tl-kickoff $name"; exit 0; }
+      printf 'OWNER: %s\n' "$ans" >> "$transcript"
+      ;;
+  esac
+done

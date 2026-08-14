@@ -28,18 +28,15 @@ on PATH.
 
 ## Kickoff (greenfield ideation — offered after `tl-new`, or on request)
 
-A brand-new project's repo is empty, so nothing can *derive* its domain — it has to come from the
-owner. Offer to brainstorm it (decline is fine — a throwaway won't want this):
+A brand-new project's repo is empty, so nothing can *derive* its domain — it comes from the owner.
+`tl-kickoff` runs the interview itself, **in the terminal** (a transcript-replay loop, one `claude -p`
+per turn) — so the **owner runs it**, you don't drive it turn-by-turn:
 
-1. **Interview the owner in chat** about the project — domain and nouns, the vision, and the first few
-   behaviours to build. Use the `superpowers:brainstorming` / `mattpocock-skills:grilling` skill if it
-   helps; keep it a real conversation, not a form.
-2. **Compose a `CONTEXT.md`** (a domain glossary: each project-specific noun defined in one line) from
-   their answers. **Show it and HARD-STOP — the domain is theirs to approve.** On approval, persist:
-   `printf '%s' "<content>" | tl-kickoff` (run from inside the project — it infers the name; writes it
-   uncommitted, the owner commits it).
-3. **Propose the seed backlog** — list the first behaviours you heard, get the owner to confirm which,
-   then `tl-backlog add <slug> "<title>" "<desc>"` for each confirmed one. **Never add unconfirmed items.**
+- Tell the owner: **`tl-kickoff`** (from inside the project) — it asks one question at a time, and when
+  it has enough it drafts `CONTEXT.md` (uncommitted) + prints ready `tl-backlog add` lines.
+- **HARD-STOP for their review** — `CONTEXT.md` (the domain) and the seed backlog are theirs to approve.
+  They commit `CONTEXT.md` and run the `tl-backlog add` lines they want. You never commit or add for them.
+- It's killable/resumable (a blank line pauses; re-running resumes from the transcript).
 
 Then → **Build**. (For an *existing* repo, skip this — `tl-scaffold-context` derives `CONTEXT.md` +
 `AGENTS.md` from the code instead. Kickoff never writes `AGENTS.md`: greenfield has no layout yet.)

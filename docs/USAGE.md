@@ -63,18 +63,18 @@ bin/tl-onboard.sh /abs/path/to/repo  # brownfield: register an EXISTING repo in 
 bin/tl-new.sh myapp                  # greenfield: create ./myapp (empty) with its own .techlead/
 ```
 
-**Kickoff a greenfield project (optional).** A brand-new repo is empty, so its domain has to come from
-you, not the code. The operator skill interviews you (domain, vision, first behaviours); once you
-approve the drafted glossary, persist it:
+**Kickoff a greenfield project (optional).** A brand-new repo is empty, so its domain comes from you.
+`tl-kickoff` runs a short **interview right in the terminal** — no Claude Code app:
 
 ```sh
-printf '# CONTEXT.md\n\n## Glossary\n- **streak** — consecutive days a habit was met.\n' \
-  | bin/tl-kickoff.sh myapp        # writes CONTEXT.md (uncommitted) — review + commit
+cd myapp && bin/tl-kickoff.sh        # asks one question at a time; answer each
 ```
 
-`tl-kickoff` only persists the composed `CONTEXT.md` (no overwrite); the interview and the seed backlog
-(`tl-backlog add`) are the skill's job, both owner-approved. For an *existing* repo, use
-`tl-scaffold-context` instead — it derives `CONTEXT.md` + `AGENTS.md` from the code.
+Each turn is a discrete `claude -p` call; the conversation is kept in a transcript file, so a blank
+line pauses it and re-running resumes. When it has enough it drafts `CONTEXT.md` (uncommitted) and
+prints ready `tl-backlog add` lines — **review + commit `CONTEXT.md`, and run the backlog lines you
+want** (both are yours to approve). `<project>` is inferred from the current `.techlead`. For an
+*existing* repo, use `tl-scaffold-context` instead — it derives `CONTEXT.md` + `AGENTS.md` from the code.
 
 `tl-init` writes `config/instance.env`, which every `tl-*` command auto-loads — **env you already
 set in the shell still wins** — so you configure the harness/model once instead of every shell.

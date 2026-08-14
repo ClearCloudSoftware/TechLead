@@ -63,6 +63,19 @@ bin/tl-onboard.sh /abs/path/to/repo  # brownfield: register an EXISTING repo in 
 bin/tl-new.sh myapp                  # greenfield: create ./myapp (empty) with its own .techlead/
 ```
 
+**Kickoff a greenfield project (optional).** A brand-new repo is empty, so its domain has to come from
+you, not the code. The operator skill interviews you (domain, vision, first behaviours); once you
+approve the drafted glossary, persist it:
+
+```sh
+printf '# CONTEXT.md\n\n## Glossary\n- **streak** — consecutive days a habit was met.\n' \
+  | bin/tl-kickoff.sh myapp        # writes CONTEXT.md (uncommitted) — review + commit
+```
+
+`tl-kickoff` only persists the composed `CONTEXT.md` (no overwrite); the interview and the seed backlog
+(`tl-backlog add`) are the skill's job, both owner-approved. For an *existing* repo, use
+`tl-scaffold-context` instead — it derives `CONTEXT.md` + `AGENTS.md` from the code.
+
 `tl-init` writes `config/instance.env`, which every `tl-*` command auto-loads — **env you already
 set in the shell still wins** — so you configure the harness/model once instead of every shell.
 `tl-onboard` (existing repo, registered at `ready` once baselined) and `tl-new` (new empty repo,

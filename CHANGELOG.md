@@ -8,6 +8,14 @@ use (§4).
 
 ## [Unreleased]
 
+### Added
+
+- **`tl-kickoff`** — greenfield project ideation. The techlead skill interviews the owner in chat
+  (domain, vision, first behaviours); `tl-kickoff <project>` persists the composed `CONTEXT.md` from
+  stdin (uncommitted, no overwrite), and the skill seeds the backlog via `tl-backlog add` — both
+  owner-approved. The greenfield complement to `tl-scaffold-context` (which derives context from an
+  existing repo); does not write `AGENTS.md` (no code layout yet) (`test/kickoff-smoke.sh`).
+
 ## [0.3.0] — 2026-08-14
 
 Per-project state, the greenfield loop end to end, and the judgment layer's reuse signal made

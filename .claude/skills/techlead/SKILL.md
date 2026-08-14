@@ -50,10 +50,12 @@ is what selects it, so every command below resolves the right project from the c
 Read state to know the next step — don't hardcode an order:
 `tl-project get <name> readiness` · `tl-spec get <id> state` + `open-count` · `tl-state <id>`.
 
-1. **If readiness is `survey`** (fresh project, no tests): **draft** a `test.sh` for the app's first
-   behaviour — a `#!/bin/sh` that runs it and `echo`s one failing-id per broken behaviour — **show it,
-   let the owner tweak/approve**, then `tl-project set <name> test_command "sh test.sh"` →
-   `tl-baseline <name>` (promotes to ready).
+1. **If readiness is `survey`** (fresh project, no tests): `tl-scaffold-test <name>` — it drafts
+   `test.sh` from the backlog (failing-id-per-line) and sets `test_command`. **Show the owner the
+   draft and HARD-STOP — a test defines what "done" means, which is theirs to approve.** After they're
+   happy, they (or you, mechanically) `git add test.sh && commit` then `tl-baseline <name>` (promotes
+   to ready). You never baseline an unreviewed harness. (Existing repos with a known stack:
+   `tl-onboard` already detected `test_command` — skip this.)
 2. Add each feature to `.techlead/data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
 3. `tl-run <slug>` — grills, then spawns.  → **open questions? HARD-STOP (rule 1).**
    - **Empty bank on a fresh project?** `tl-run` STOPs and drafts candidate questions to

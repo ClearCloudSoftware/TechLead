@@ -15,9 +15,9 @@ esac; done
 harness="$(tl_choose HARNESS "coding harness" "claude" claude opencode)"
 case "$harness" in
   claude)   worker="$TL_HOME/adapters/claude-worker.sh";   grill="$TL_HOME/adapters/claude-grill.sh"
-            propose="$TL_HOME/adapters/claude-grill-propose.sh"; model="";;
+            propose="$TL_HOME/adapters/claude-grill-propose.sh"; scaffold="$TL_HOME/adapters/claude-scaffold-test.sh"; model="";;
   opencode) worker="$TL_HOME/adapters/opencode-worker.sh"; grill="$TL_HOME/adapters/opencode-grill.sh"
-            propose=""   # no opencode proposer yet → propose-mode falls back to the seed-by-hand message
+            propose=""; scaffold=""   # no opencode proposer/scaffolder yet → both fall back to by-hand
             model="$(tl_ask MODEL "opencode model (must support tools)" "ollama/qwen3-coder:30b")";;
   *) tl_die "unknown harness: $harness (want claude|opencode)";;
 esac
@@ -33,6 +33,7 @@ mkdir -p "$(dirname "$TL_CONFIG")"
   printf 'export TL_WORKER_CMD="${TL_WORKER_CMD:-%s}"\n' "$worker"
   printf 'export TL_GRILL_CMD="${TL_GRILL_CMD:-%s}"\n' "$grill"
   [ -n "$propose" ] && printf 'export TL_GRILL_PROPOSE_CMD="${TL_GRILL_PROPOSE_CMD:-%s}"\n' "$propose"
+  [ -n "$scaffold" ] && printf 'export TL_SCAFFOLD_TEST_CMD="${TL_SCAFFOLD_TEST_CMD:-%s}"\n' "$scaffold"
   [ -n "$model" ] && printf 'export TL_OPENCODE_MODEL="${TL_OPENCODE_MODEL:-%s}"\n' "$model"
 } > "$TL_CONFIG"
 tl_log "wrote $TL_CONFIG"

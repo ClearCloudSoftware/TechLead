@@ -28,6 +28,73 @@ use (§4).
   no overwrite) + prints ready `tl-backlog add` lines — both owner-approved. `<project>` is inferred
   from the current `.techlead`. The greenfield complement to `tl-scaffold-context`; never writes
   `AGENTS.md` (`test/kickoff-smoke.sh`).
+- **Answer the grill in the terminal** — `tl-grill answer <id>` with no qid walks the open questions
+  one at a time (pick a state, type the answer) instead of retyping the full command per question,
+  and `tl-grill prune <slug>` multi-selects which proposed questions survive instead of editing the
+  proposal file by hand. Both go through the existing single writer, so the correction log and the
+  D13 metric are unchanged. No tty → both refuse rather than rubber-stamp (`test/prompt-smoke.sh`).
+- **`tl_text` / `tl_pick_many` prompt helpers** in `tl-wizard.sh`, on the same optional-enhancement
+  seam as `tl_choose`: [`gum`](https://github.com/charmbracelet/gum) → `fzf` → numbered menu. Neither
+  is required. Gate finding resolution now uses the shared picker too.
+- **Tables wrap instead of truncating.** Neither `gum table` nor its `--widths` wraps, so a long
+  question was simply cut off — the one thing a decision table must not do. The renderer now wraps
+  the widest column to whatever width the fixed columns leave and lets the row grow taller (gum
+  accepts newlines inside a quoted CSV field; the plain form continues on further lines with its
+  neighbours blank). Wrapping is skipped when not decorating, so captured output keeps one line per
+  record.
+- **`tl_table`** — question lists (`tl-grill`, `tl-run`'s open-question stop), gate findings, and the
+  ledgers (`tl-cost report`, `tl-metric report`/`outcome`) render as a `gum table` when gum is
+  installed and stdout is a terminal, and as a width-measuring aligned table otherwise. Captured
+  output stays whitespace-columned, so `tl-cost report | awk '$1=="worker"{print $2}'` still parses;
+  the machine-readable forms (`tl-spec qlist`'s pipe encoding, `findings.json`) are untouched.
+  `TL_NO_TABLE=1` forces the plain form (also useful in the rare pty that never answers
+  terminal queries, where gum would block).
+- **`tl_spin`** — the steps that used to go silent for tens of seconds now show a spinner: the test
+  suite in `tl-baseline` and `tl-gate`, the grill driver, the proposer, the answer engine, and the
+  spec-axis judge. Callers keep their own redirections inside the command, so nothing that gets
+  parsed passes through the spinner.
+- **`tl_page`** — `tl-approve`, `tl-grill show`, `tl-review`, and `tl-answer` page their output when
+  it does not fit, and render markdown through `glow`/`gum format`. `tl-approve` in particular used
+  to `cat` a long report and then print the approve/skip/fix prompt below it, so the evidence and the
+  decision were never on screen together.
+- **`tl-kickoff` and `tl-scaffold-context` get the same treatment** — the interview frames each
+  question so the lead's turn is visibly not your own typing, runs each model call under a spinner,
+  and *shows* the drafted `CONTEXT.md`/`AGENTS.md` rendered instead of telling you to go open them.
+  The seed backlog is now a multi-select that adds what you pick (the same curate-then-commit shape
+  as `tl-grill prune`); the copy-paste `tl-backlog add` lines are still printed, so nothing is lost
+  and the non-interactive contract is unchanged.
+- **Fuzzy pickers for omitted arguments** — `tl-peek`, `tl-approve`, `tl-deliver`, `tl-teardown` pick
+  a task id from the live fleet; `tl-run` picks a backlog slug; `tl-onboard` browses for a repo
+  directory; `tl-new` prompts for a name. Non-interactively they still print usage and exit.
+- **Read-only findings navigator** in `tl-gate` when a gate produces more than five findings —
+  select a row to read it in full. Deliberately *not* a resolve UI: §2.3.1 makes that gate a
+  one-at-a-time chokepoint, and a selectable list is how bulk-approving starts.
+- **Colourised output** — `tl_stop`/`tl_ok`/`tl_kv`/`tl_note` in `tl-common.sh` give refusals,
+  successes, and next-step lines distinct weight. Only when stdout is a terminal; `NO_COLOR` honoured,
+  so piped and captured output is byte-identical to before.
+- **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
+  trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
+  superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K
+  tokens per always-loaded file) in `AGENTS.md`. Convention only, lifted from an evaluated-and-
+  rejected memory tool — no dependency or runtime.
+- **`tl-scrub`** — a deterministic deny-pattern guard that scans content entering `lead/`/`decisions/`
+  for keys, tokens, credentials, and internal hostnames; on a hit it escalates for owner review and
+  never strips (`test/scrub-smoke.sh`).
+
+### Fixed
+
+- **The smoke suite inherited `config/instance.env`.** Every test exports `TL_HOME=$REPO`, and
+  `tl-common` loads `$TL_HOME/config/instance.env` from it — so once `tl-init` had been run in a
+  checkout, the tests silently picked up the real Claude adapters. Assertions about "no scaffolder
+  configured" started failing, and worse, a smoke run could call a model and spend tokens. Tests are
+  now hermetic (`TL_CONFIG=`), and `TL_CONFIG` honours an explicit empty value (`${TL_CONFIG-…}`,
+  not `:-`) so that opt-out exists at all.
+
+- **`tl-gate` silently discarded its own refusal.** `exec 3</dev/tty 2>/dev/null` applies *both*
+  redirections to the shell permanently, so once the interactive resolve branch was taken every
+  later stderr write went to `/dev/null` — including `gate blocked: N finding(s) unresolved`. An
+  owner sitting at a terminal who marked a finding `fix` got exit 3 and no explanation. The exec is
+  now brace-grouped so the silencing is scoped to it.
 
 ## [0.3.0] — 2026-08-14
 
@@ -60,74 +127,6 @@ nothing crosses into deciding what "correct" means without a human.
   and a review bumps the `review-rubric.md` rules its findings cited (the driver reports which via a
   numbered ref; `bump_hits` in `tl-common.sh` is the single owner of the write). The D13 / risk-1
   reuse signal is no longer hand-kept. (#107, #109)
-
-- **Answer the grill in the terminal** — `tl-grill answer <id>` with no qid walks the open questions
-  one at a time (pick a state, type the answer) instead of retyping the full command per question,
-  and `tl-grill prune <slug>` multi-selects which proposed questions survive instead of editing the
-  proposal file by hand. Both go through the existing single writer, so the correction log and the
-  D13 metric are unchanged. No tty → both refuse rather than rubber-stamp (`test/prompt-smoke.sh`).
-- **`tl_text` / `tl_pick_many` prompt helpers** in `tl-wizard.sh`, on the same optional-enhancement
-  seam as `tl_choose`: [`gum`](https://github.com/charmbracelet/gum) → `fzf` → numbered menu. Neither
-  is required. Gate finding resolution now uses the shared picker too.
-- **Tables wrap instead of truncating.** Neither `gum table` nor its `--widths` wraps, so a long
-  question was simply cut off — the one thing a decision table must not do. The renderer now wraps
-  the widest column to whatever width the fixed columns leave and lets the row grow taller (gum
-  accepts newlines inside a quoted CSV field; the plain form continues on further lines with its
-  neighbours blank). Wrapping is skipped when not decorating, so captured output keeps one line per
-  record.
-- **`tl_table`** — question lists (`tl-grill`, `tl-run`'s open-question stop), gate findings, and the
-  ledgers (`tl-cost report`, `tl-metric report`/`outcome`) render as a `gum table` when gum is
-  installed and stdout is a terminal, and as a width-measuring aligned table otherwise. Captured
-  output stays whitespace-columned, so `tl-cost report | awk '$1=="worker"{print $2}'` still parses;
-  the machine-readable forms (`tl-spec qlist`'s pipe encoding, `findings.json`) are untouched.
-  `TL_NO_TABLE=1` forces the plain form; gum truncates long cells rather than wrapping.
-- **`tl_spin`** — the steps that used to go silent for tens of seconds now show a spinner: the test
-  suite in `tl-baseline` and `tl-gate`, the grill driver, the proposer, the answer engine, and the
-  spec-axis judge. Callers keep their own redirections inside the command, so nothing that gets
-  parsed passes through the spinner.
-- **`tl_page`** — `tl-approve`, `tl-grill show`, `tl-review`, and `tl-answer` page their output when
-  it does not fit, and render markdown through `glow`/`gum format`. `tl-approve` in particular used
-  to `cat` a long report and then print the approve/skip/fix prompt below it, so the evidence and the
-  decision were never on screen together.
-- **`tl-kickoff` and `tl-scaffold-context` get the same treatment** — the interview frames each
-  question so the lead's turn is visibly not your own typing, runs each model call under a spinner,
-  and *shows* the drafted `CONTEXT.md`/`AGENTS.md` rendered instead of telling you to go open them.
-  The seed backlog is now a multi-select that adds what you pick (the same curate-then-commit shape
-  as `tl-grill prune`); the copy-paste `tl-backlog add` lines are still printed, so nothing is lost
-  and the non-interactive contract is unchanged.
-- **Fuzzy pickers for omitted arguments** — `tl-peek`, `tl-approve`, `tl-deliver`, `tl-teardown` pick
-  a task id from the live fleet; `tl-run` picks a backlog slug; `tl-onboard` browses for a repo
-  directory; `tl-new` prompts for a name. Non-interactively they still print usage and exit.
-- **Read-only findings navigator** in `tl-gate` when a gate produces more than five findings —
-  select a row to read it in full. Deliberately *not* a resolve UI: §2.3.1 makes that gate a
-  one-at-a-time chokepoint, and a selectable list is how bulk-approving starts.
-- **Colourised output** — `tl_stop`/`tl_ok`/`tl_kv`/`tl_note` in `tl-common.sh` give refusals,
-  successes, and next-step lines distinct weight. Only when stdout is a terminal; `NO_COLOR` honoured,
-  so piped and captured output is byte-identical to before.
-
-### Fixed
-
-- **The smoke suite inherited `config/instance.env`.** Every test exports `TL_HOME=$REPO`, and
-  `tl-common` loads `$TL_HOME/config/instance.env` from it — so once `tl-init` had been run in a
-  checkout, the tests silently picked up the real Claude adapters. Assertions about "no scaffolder
-  configured" started failing, and worse, a smoke run could call a model and spend tokens. Tests are
-  now hermetic (`TL_CONFIG=`), and `TL_CONFIG` honours an explicit empty value (`${TL_CONFIG-…}`,
-  not `:-`) so that opt-out exists at all.
-
-- **`tl-gate` silently discarded its own refusal.** `exec 3</dev/tty 2>/dev/null` applies *both*
-  redirections to the shell permanently, so once the interactive resolve branch was taken every
-  later stderr write went to `/dev/null` — including `gate blocked: N finding(s) unresolved`. An
-  owner sitting at a terminal who marked a finding `fix` got exit 3 and no explanation. The exec is
-  now brace-grouped so the silencing is scoped to it.
-
-- **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
-  trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
-  superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K
-  tokens per always-loaded file) in `AGENTS.md`. Convention only, lifted from an evaluated-and-
-  rejected memory tool — no dependency or runtime.
-- **`tl-scrub`** — a deterministic deny-pattern guard that scans content entering `lead/`/`decisions/`
-  for keys, tokens, credentials, and internal hostnames; on a hit it escalates for owner review and
-  never strips (`test/scrub-smoke.sh`).
 
 ### Fixed
 

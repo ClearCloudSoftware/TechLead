@@ -36,7 +36,8 @@ owner. Offer to brainstorm it (decline is fine — a throwaway won't want this):
    helps; keep it a real conversation, not a form.
 2. **Compose a `CONTEXT.md`** (a domain glossary: each project-specific noun defined in one line) from
    their answers. **Show it and HARD-STOP — the domain is theirs to approve.** On approval, persist:
-   `printf '%s' "<content>" | tl-kickoff <name>` (writes it uncommitted; the owner commits it).
+   `printf '%s' "<content>" | tl-kickoff` (run from inside the project — it infers the name; writes it
+   uncommitted, the owner commits it).
 3. **Propose the seed backlog** — list the first behaviours you heard, get the owner to confirm which,
    then `tl-backlog add <slug> "<title>" "<desc>"` for each confirmed one. **Never add unconfirmed items.**
 

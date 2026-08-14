@@ -7,7 +7,11 @@
 # seed-backlog next steps. For a BROWNFIELD repo, tl-scaffold-context derives CONTEXT.md from the code.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
-name="${1:?usage: tl-kickoff <project>   (composed CONTEXT.md on stdin)}"
+# <project> is optional: run from inside the project and it defaults to the one registered there.
+name="${1:-}"
+if [ -z "$name" ]; then
+  name="$(tl_current_project)" || tl_die "run from inside a project (or pass its name). Registered here: $(ls "$TL_DATA/projects" 2>/dev/null | sed 's/\.conf$//' | tr '\n' ' ')"
+fi
 path="$("$BIN/tl-project.sh" get "$name" path)" || tl_die "unknown project: $name (tl-new/tl-onboard it first)"
 target="$path/CONTEXT.md"
 if [ -e "$target" ]; then tl_die "$target already exists — edit it by hand (refusing to overwrite)"; fi

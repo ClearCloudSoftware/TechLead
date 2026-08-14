@@ -38,4 +38,11 @@ grep -q 'no CONTEXT.md content' /tmp/kf-k3.log || fail "K3: wrong error for empt
 [ ! -e "$PROJ/CONTEXT.md" ] || fail "K3: wrote an empty CONTEXT.md"
 echo "  K3 ok — empty input refused, nothing written"
 
-echo "PASS: tl-kickoff persists a composed CONTEXT.md (uncommitted, no overwrite, no empty write)"
+echo "== K4: <project> is optional — defaults to the sole project registered here =="
+rm -f "$PROJ/CONTEXT.md"
+printf '# CONTEXT.md\n\n## Glossary\n- **streak** — days in a row.\n' | "$BIN/tl-kickoff.sh" >/tmp/kf-k4.log 2>&1 \
+  || fail "K4: no-arg kickoff failed to resolve the current project: $(cat /tmp/kf-k4.log)"
+[ -f "$PROJ/CONTEXT.md" ] || fail "K4: did not write CONTEXT.md when the name was inferred"
+echo "  K4 ok — inferred the project from the current .techlead"
+
+echo "PASS: tl-kickoff persists a composed CONTEXT.md (uncommitted, no overwrite, no empty write; infers the project)"

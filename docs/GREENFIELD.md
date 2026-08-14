@@ -18,7 +18,8 @@ Everything below is elaboration on this:
 ```sh
 tl-init.sh                          # 1. once per machine
 tl-new.sh habit && cd habit         # 2. create + register the project
-#   …append a backlog item…         # 3. what to build
+tl-kickoff.sh                       #   (optional) interview → CONTEXT.md + seed backlog
+#   …append a backlog item…         # 3. what to build (or seeded by kickoff above)
 tl-scaffold-test.sh habit           # 4. drafts test.sh + sets test_command, then stops
 #   …review it, commit it…          #    ← STOP: what "correct" means is yours to approve
 tl-baseline.sh habit                # 5. survey → ready
@@ -175,10 +176,74 @@ To create every project under a fixed directory instead of `$PWD`, export `TL_PR
 
 ---
 
+## Step 2½ — kickoff the domain *(optional, greenfield only)*
+
+A brand-new repo has no code to read, so its domain — the vocabulary, the shape, the first few
+things worth building — comes from you. `tl-kickoff` runs a short **interview right in the terminal**
+(no Claude Code app) and turns your answers into two things: a `CONTEXT.md` glossary and a seed
+backlog. Skip it if you already know exactly what the first item is — Step 3 writes one by hand.
+
+```sh
+tl-kickoff.sh            # <project> inferred from the current .techlead
+```
+
+```
+tl: kickoff interview for 'habit' — the lead asks one question at a time; answer each.
+tl: (blank line + Enter, or Ctrl-D, pauses — re-run tl-kickoff to resume from where you left off.)
+
+LEAD: What is habit for, and who runs it — a personal CLI, or something shared?
+> a personal shell CLI for tracking daily habits in a plain text file
+LEAD: …
+```
+
+Each turn is one discrete `claude -p` call; the running conversation is kept in a **transcript file**,
+not in any agent's memory — so it's killable and resumable exactly like everything else (§3.2). A
+blank line (or Ctrl-D) pauses it; re-running `tl-kickoff` picks up where you left off. There is no
+LLM holding the session open.
+
+When the lead has heard enough it **stops and hands you drafts** — it never writes into your project
+or your backlog on its own:
+
+```
+tl: drafted /Users/you/projects/habit/CONTEXT.md (uncommitted). REVIEW it — the domain is yours to
+    approve — then commit:
+      git -C /Users/you/projects/habit add CONTEXT.md && git -C … commit -m 'add CONTEXT.md'
+tl: seed backlog — run the ones you want:
+      tl-backlog add add-habit "Add a habit to the list" "habit add <name> appends to $HABITS…"
+      tl-backlog add list-habits "List tracked habits" "habit list prints the file…"
+```
+
+`CONTEXT.md` lands **uncommitted** — read it, fix the glossary, commit it. The backlog lines are
+**printed, not run** — paste the ones you want, drop the rest. Both are yours to approve; that is the
+whole point of the step. Once `CONTEXT.md` is committed the grill, review, and answer kinds read it,
+so the lead speaks your project's vocabulary instead of guessing it. It refuses to overwrite an
+existing `CONTEXT.md`.
+
+<details>
+<summary><b>Finer grain</b> — the brownfield complement, and the driver</summary>
+
+Kickoff is the **greenfield** path: an empty repo, so the material comes from you. For an **existing**
+repo, use `tl-scaffold-context` instead — it reads the code and drafts both `AGENTS.md` (layout,
+current + deprecated conventions, danger zones) and `CONTEXT.md` (domain glossary) as real files,
+then stops for the same review-and-commit. Same draft-then-approve contract, opposite source of truth.
+
+```sh
+tl-scaffold-context.sh        # existing repo: derive AGENTS.md + CONTEXT.md from the code, then stop
+```
+
+Both need a driver: kickoff uses `TL_KICKOFF_CMD` (wired to `adapters/claude-kickoff.sh` by
+`tl-init`), scaffold-context uses `TL_SCAFFOLD_CONTEXT_CMD`. Unset on the opencode harness — there
+you write `CONTEXT.md` by hand. The transcript lives at `.techlead/data/kickoff-<project>.transcript`
+until the interview finishes; delete it to start over.
+</details>
+
+---
+
 ## Step 3 — the first backlog item
 
-The backlog is plain markdown, one item per `## <slug>: <title>` heading. Write it now — it is both
-what you're about to build and what Step 4's harness gets drafted from:
+If Step 2½ seeded the backlog, this is done — skim it and move on. Otherwise write one by hand: the
+backlog is plain markdown, one item per `## <slug>: <title>` heading. It is both what you're about to
+build and what Step 4's harness gets drafted from:
 
 ```sh
 cat >> .techlead/data/backlog.md <<'EOF'
@@ -656,7 +721,7 @@ tl-spec.sh set tl-add-habit outcome "q3 missed the empty-file case — reverted"
 
 ## Command index
 
-All 41 scripts in `bin/`. Bold entries are the greenfield path.
+All 44 scripts in `bin/`. Bold entries are the greenfield path.
 
 **Setup and registration**
 
@@ -667,6 +732,8 @@ All 41 scripts in `bin/`. Bold entries are the greenfield path.
 | `tl-onboard` | brownfield: register an existing repo in place, detect defaults, baseline it |
 | **`tl-project`** | single owner of the registry — `get`/`set`/`path` per key |
 | **`tl-baseline`** | capture the known-failing set; promotes `survey` → `ready` |
+| `tl-kickoff` | greenfield only: interview the owner → draft `CONTEXT.md` + seed backlog, then stop |
+| `tl-scaffold-context` | brownfield: read the repo → draft `AGENTS.md` + `CONTEXT.md`, then stop |
 | `tl-scaffold-test` | greenfield only: draft `test.sh` from the backlog, set `test_command`, then stop |
 | `tl-detect` | suggest one default (mode/branch/test-command/danger-paths) or stay silent |
 | `tl-wizard` | *(sourced)* prompt helpers; `TL_YES` / `TL_ANSWER_<KEY>` make wizards scriptable |

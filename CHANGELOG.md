@@ -69,6 +69,12 @@ nothing crosses into deciding what "correct" means without a human.
 - **`tl_text` / `tl_pick_many` prompt helpers** in `tl-wizard.sh`, on the same optional-enhancement
   seam as `tl_choose`: [`gum`](https://github.com/charmbracelet/gum) → `fzf` → numbered menu. Neither
   is required. Gate finding resolution now uses the shared picker too.
+- **Tables wrap instead of truncating.** Neither `gum table` nor its `--widths` wraps, so a long
+  question was simply cut off — the one thing a decision table must not do. The renderer now wraps
+  the widest column to whatever width the fixed columns leave and lets the row grow taller (gum
+  accepts newlines inside a quoted CSV field; the plain form continues on further lines with its
+  neighbours blank). Wrapping is skipped when not decorating, so captured output keeps one line per
+  record.
 - **`tl_table`** — question lists (`tl-grill`, `tl-run`'s open-question stop), gate findings, and the
   ledgers (`tl-cost report`, `tl-metric report`/`outcome`) render as a `gum table` when gum is
   installed and stdout is a terminal, and as a width-measuring aligned table otherwise. Captured
@@ -100,6 +106,13 @@ nothing crosses into deciding what "correct" means without a human.
   so piped and captured output is byte-identical to before.
 
 ### Fixed
+
+- **The smoke suite inherited `config/instance.env`.** Every test exports `TL_HOME=$REPO`, and
+  `tl-common` loads `$TL_HOME/config/instance.env` from it — so once `tl-init` had been run in a
+  checkout, the tests silently picked up the real Claude adapters. Assertions about "no scaffolder
+  configured" started failing, and worse, a smoke run could call a model and spend tokens. Tests are
+  now hermetic (`TL_CONFIG=`), and `TL_CONFIG` honours an explicit empty value (`${TL_CONFIG-…}`,
+  not `:-`) so that opt-out exists at all.
 
 - **`tl-gate` silently discarded its own refusal.** `exec 3</dev/tty 2>/dev/null` applies *both*
   redirections to the shell permanently, so once the interactive resolve branch was taken every

@@ -19,6 +19,7 @@ cat > "$PROJ/.techlead/data/backlog.md" <<'EOF'
 ## greet: print a greeting
 Add hello() to greet.sh that echoes "hi".
 EOF
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$REPO" TL_DATA="$PROJ/.techlead/data" TL_STATE="$PROJ/.techlead/state" TL_LEAD="$PROJ/.techlead/lead"
 mkdir -p "$TL_STATE" "$TL_LEAD"
 "$BIN/tl-project.sh" set app path "$PROJ"

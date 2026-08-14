@@ -6,6 +6,7 @@ set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"; BIN="$REPO/bin"
 fail() { echo "FAIL: $1"; exit 1; }
 WORK="$(mktemp -d)"
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$REPO" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_WORKTREES="$WORK/state/wt"
 cleanup() { rm -rf "$WORK"; }; trap cleanup EXIT
 mkdir -p "$TL_DATA"
@@ -103,6 +104,24 @@ out="$(printf 'answer\t1000\t200\t0.4200\n' | tl_table "CATEGORY,INPUT,OUTPUT,CO
 case "$out" in *│*|*╭*) fail "captured table is boxed — every awk column assertion breaks";; esac
 [ "$(printf '%s\n' "$out" | awk '$1=="answer"{print $2}')" = 1000 ] || fail "column 2 not parseable: $out"
 [ "$(printf '%s\n' "$out" | awk '$1=="answer"{print $4}')" = "0.4200" ] || fail "column 4 not parseable: $out"
+
+echo "== tl_table wraps a long cell onto more lines instead of cutting the question off =="
+long="Reuse the existing secrets backend rather than introduce a new one, given the rotation window and the on-call rota?"
+rows="$(printf 'q1\tdecided\t%s\nq2\topen\tshort one\n' "$long")"
+# Decorating + a narrow terminal: the free-text column wraps, and its continuation lines carry
+# blanks in the fixed columns so the row still reads as one record.
+out="$(printf '%s\n' "$rows" | TL_DECORATE=1 TL_NO_TABLE=1 tl_table "QID,STATE,QUESTION")"
+[ "$(printf '%s\n' "$out" | grep -c .)" -gt 3 ] || fail "long cell was not wrapped: $out"
+printf '%s\n' "$out" | grep -q '^  q1 ' || fail "wrapped row lost its first line"
+printf '%s\n' "$out" | grep -qE '^ +[a-z]' || fail "no continuation line with blank fixed columns: $out"
+printf '%s\n' "$out" | grep -q 'on-call rota?' || fail "the tail of the question was cut off: $out"
+# Every wrapped fragment must still be a word, not a mid-word chop.
+printf '%s\n' "$out" | grep -q 'introduc$' && fail "wrapped mid-word instead of at a space"
+
+# Captured output must NOT wrap: one physical line per record keeps awk column assertions working.
+out="$(printf '%s\n' "$rows" | tl_table "QID,STATE,QUESTION")"
+[ "$(printf '%s\n' "$out" | grep -c .)" = 3 ] || fail "captured table wrapped (header + 2 rows expected): $out"
+[ "$(printf '%s\n' "$out" | awk '$1=="q1"{print $2}')" = decided ] || fail "captured row no longer parses"
 
 echo "== when gum is installed: the right subcommand, and a cancel that propagates =="
 # Two defects this pins down, both found by hand at a real terminal:

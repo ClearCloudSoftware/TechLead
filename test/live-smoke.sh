@@ -29,6 +29,7 @@ cat > "$INST/lead/questions.md" <<'EOF'
 - Is there a simpler version that still covers the need?
 EOF
 
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$INST" TL_DATA="$INST/data" TL_STATE="$INST/state" TL_WORKTREES="$INST/state/wt"
 export TL_WORKER_CMD="$REPO/adapters/opencode-worker.sh"
 export TL_GRILL_CMD="$REPO/adapters/opencode-grill.sh"

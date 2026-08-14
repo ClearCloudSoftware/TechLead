@@ -12,6 +12,7 @@ cleanup() { rm -rf "$WORK" "$PROJ" 2>/dev/null; }; trap cleanup EXIT
 PROJ="$(mktemp -d)/app"; mkdir -p "$PROJ/.techlead/data" "$PROJ/.techlead/lead"
 git -C "$PROJ" init -q -b main
 git -C "$PROJ" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+export TL_CONFIG=          # hermetic: ignore any config/instance.env in this checkout
 export TL_HOME="$REPO" TL_DATA="$PROJ/.techlead/data" TL_STATE="$PROJ/.techlead/state" TL_LEAD="$PROJ/.techlead/lead"
 export TL_BACKLOG="$PROJ/.techlead/data/backlog.md"
 mkdir -p "$TL_STATE"

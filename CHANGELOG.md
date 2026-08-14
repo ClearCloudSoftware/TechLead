@@ -46,6 +46,14 @@ use (§4).
     both**: a `BRANCH` column in `:fleet`, and worktree path + base sha + commits-ahead + dirty in
     the detail pane. With several workers in flight that is what tells two rows apart, and what
     says which branch `g` is about to merge. The git-touching parts run for the selected row only.
+  - A shelled command that **fails is now reported**. `_shell_out` threw the exit status away, so
+    a command that died printed its error, the pause scrolled it past, and the TUI came back
+    looking untouched — indistinguishable from one that ran and changed nothing.
+  - A dispatched task recedes out of the priority list, so its row now says **how long it has been
+    going and when its session last wrote** (`:fleet` carries the elapsed time too). Without that,
+    a worker with nothing to show for ten minutes looks exactly like a wedged one.
+  - `/` starts a **fresh** filter instead of being seeded with the current one, so `/` then enter
+    clears it and a new term replaces rather than concatenates.
 - **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader
   doesn't grow a second copy of the heading awk (§3.1).
 
@@ -111,6 +119,12 @@ nothing crosses into deciding what "correct" means without a human.
   never strips (`test/scrub-smoke.sh`).
 
 ### Fixed
+
+- **`tl-grill` failed OPEN when its driver died.** The driver ran on the left of a pipe, so the
+  pipeline's status was the read loop's — always 0. A driver that could not start (no API key, bad
+  model, missing binary) therefore looked like a grill that ran and found nothing: `_finalize` then
+  marked the spec `specified` with zero questions, which reads as *ready to dispatch*. It now checks
+  the driver's status and refuses, leaving the spec `drafted` (§3.9 fail closed).
 
 - **Fail closed on un-grilled work** — `tl-run` refuses to dispatch a spec with zero grilled questions
   (an empty question bank) instead of silently spawning a worker on an empty spec. (#99)

@@ -26,6 +26,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 
 
@@ -43,6 +44,11 @@ class Row:
     branch: str = ""
     worktree: str = ""
     base: str = ""      # the sha the worktree started from, for "how far ahead is this?"
+    # liveness (§3.5): `started` is when the task was dispatched, `active` when its session last
+    # wrote. A worker with nothing to show for ten minutes looks identical to a wedged one without
+    # these — and once dispatched, a task recedes into the quiet line, so this is all you get.
+    started: float = 0.0
+    active: float = 0.0
 
 
 # Visual/sort priority: lower = louder. Unresolved gate findings are the single most important
@@ -106,6 +112,30 @@ def read_findings(path):
         return []
 
 
+def _liveness(r):
+    """What a working row says instead of nothing: when its session last wrote. Cooperative signals
+    say what a worker is doing; OS activity says whether it is alive at all (§3.5)."""
+    if not r.active:
+        return "no session output yet"
+    return "last output %s ago" % age(time.time() - r.active)
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def age(seconds):
+    """Compact elapsed time: 45s, 4m, 2h, 3d. Ages are read at render, never stored."""
+    seconds = int(max(0, seconds))
+    for div, unit in ((86400, "d"), (3600, "h"), (60, "m")):
+        if seconds >= div:
+            return "%d%s" % (seconds // div, unit)
+    return "%ds" % seconds
+
+
 def project_name(meta):
     return meta.get("pname") or os.path.basename(meta.get("project", "").rstrip("/")) or "?"
 
@@ -133,6 +163,8 @@ def build_fleet_model(state_dir, data_dir, state_of):
             branch=meta.get("branch", ""),
             worktree=meta.get("worktree", ""),
             base=meta.get("base", ""),
+            started=_mtime(path),
+            active=_mtime(os.path.join(state_dir, "sessions", tid, "log")),
         ))
     rows.sort(key=lambda r: (r.rank, r.id))
     return rows
@@ -848,9 +880,11 @@ def _draw_inbox(win, st, q, data_dir):
     y = 2 + drawn + 1
     y = _draw_detail(win, rows[sel], y, h - 2, data_dir)
     if q.quiet and y < h - 2:
-        names = " · ".join("%s %s" % (r.id, r.state) for r in q.quiet[:4])
-        _addln(win, h - 2, 0, "quiet: %d working — %s" % (len(q.quiet), names),
-               _bucket_attr("quiet"))
+        now = time.time()
+        names = " · ".join("%s %s" % (r.id, age(now - r.started) if r.started else r.state)
+                           for r in q.quiet[:4])
+        _addln(win, h - 2, 0, "working: %d — %s   (3 modal → :fleet to watch)"
+               % (len(q.quiet), names), _bucket_attr("quiet"))
     _foot_inbox(win, st, q, rows[sel])
 
 
@@ -892,7 +926,7 @@ def _draw_detail(win, r, y, ymax, data_dir):
             _addln(win, y, 0, "%d already decided here — 2 briefing shows them in full"
                    % len(done), _bucket_attr("quiet")); y += 1
     elif r.what == "gate":
-        for ln in worktree_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
+        for ln in fleet_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
             if y < ymax:
                 _addln(win, y, 0, ln, _bucket_attr("quiet")); y += 1
         y = _rule(win, y, "findings")
@@ -917,7 +951,7 @@ def _draw_detail(win, r, y, ymax, data_dir):
         # repeated in full before the peek tail, not replaced by it.
         y = _rule(win, y, r.task)
         y = _para(win, y, ymax, 0, r.detail, curses.A_BOLD)
-        for ln in worktree_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
+        for ln in fleet_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
             if y < ymax:
                 _addln(win, y, 0, ln, _bucket_attr("quiet")); y += 1
         remaining = ymax - y
@@ -955,7 +989,7 @@ def _draw_briefing(win, st, q, data_dir):
         _addln(win, y, 2, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at),
                _bucket_attr("quiet")); y += 2
 
-    for ln in worktree_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
+    for ln in fleet_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
         if y < ymax:
             _addln(win, y, 2, ln, _bucket_attr("quiet")); y += 1
     if r.fleet:
@@ -1053,15 +1087,17 @@ def modal_table(view, arg, q, data_dir, lead_dir):
     # fleet (default)
     rows = []
     fmt = "%-22s %-7s %-14s %-25s %s"
+    def _state_col(r):
+        return ("%s %s" % (r.state, age(time.time() - r.started)))[:14] if r.started else r.state[:14]
     for r in sorted(q.quiet, key=lambda r: r.id):
-        rows.append((fmt % (r.id[:22], r.kind[:7], r.state[:14], (r.branch or "-")[:25],
-                            r.waiting_on),
+        rows.append((fmt % (r.id[:22], r.kind[:7], _state_col(r), (r.branch or "-")[:25],
+                            _liveness(r)),
                      Target(r.id, "", "", "", "%s on %s — %s" % (r.kind, r.branch or "?", r.project))))
     for r in q.rows:
         if r.fleet:
             f = r.fleet
-            rows.insert(0, (fmt % (f.id[:22], f.kind[:7], f.state[:14], (f.branch or "-")[:25],
-                                   f.waiting_on),
+            rows.insert(0, (fmt % (f.id[:22], f.kind[:7], _state_col(f), (f.branch or "-")[:25],
+                                   f.waiting_on or _liveness(f)),
                             Target(f.id, "", "", r.slug, r.detail)))
     return ("techlead > fleet",
             fmt % ("TASK", "KIND", "STATE", "BRANCH", "WAITING ON"),
@@ -1207,6 +1243,15 @@ def worktree_lines(f, project_root=""):
     return out + [tail]
 
 
+def fleet_lines(f, project_root=""):
+    """What a dispatched row shows about itself: where it is running, and whether it is alive.
+    Once a task is working it recedes out of the priority list, so this is the whole story."""
+    out = worktree_lines(f, project_root)
+    if f is not None and f.started:
+        out.append("started   %s ago   ·   %s" % (age(time.time() - f.started), _liveness(f)))
+    return out
+
+
 def _suspend(win, fn):
     """The curses handoff: release the terminal, run fn full-screen, restore + repaint."""
     curses.def_prog_mode()
@@ -1219,16 +1264,34 @@ def _suspend(win, fn):
 
 
 def _shell_out(win, argv):
+    """Hand the terminal to a real tl-* command, then RETURN ITS EXIT CODE.
+
+    Throwing the status away made every failure silent: the command printed its error, the pause
+    scrolled it out of mind, and the TUI came back looking untouched — indistinguishable from
+    nothing having happened. A grill with no TL_GRILL_CMD exits 1 before doing any work, and that
+    looked exactly like a grill that ran and found nothing."""
+    rc = {}
     def go():
         try:
-            subprocess.call(argv)
+            rc["code"] = subprocess.call(argv)
         except OSError as e:
+            rc["code"] = 127
             print("\ntl-top: could not run %s (%s)" % (argv[0], e))
+        code = rc.get("code", 1)
+        banner = "" if code == 0 else ("\n*** %s exited %d — the error is above ***"
+                                       % (os.path.basename(argv[0]), code))
         try:
-            input("\n[enter to return] ")
+            input("%s\n[enter to return] " % banner)
         except EOFError:
             pass
     _suspend(win, go)
+    return rc.get("code", 1)
+
+
+def _ran(argv, rc, ok):
+    """The notice for a shelled command, so its outcome survives the return to the TUI."""
+    name = os.path.basename(argv[0]).replace(".sh", "")
+    return ok if rc == 0 else "%s exited %d — nothing changed (its error was on the shell)" % (name, rc)
 
 
 def _peek_fullscreen(win, tid):
@@ -1540,7 +1603,10 @@ def _loop(win):
         elif ch == ord("?"):
             _help(win)
         elif ch == ord("/"):
-            f = _prompt(win, "/", st["filter"], rows=1)
+            # Deliberately NOT seeded with the current filter: `/` starts a fresh one, so enter on
+            # an empty prompt clears it and a new term replaces rather than concatenates. Seeding
+            # made re-filtering require clearing the old text first, and `/` then enter a no-op.
+            f = _prompt(win, "/", "", rows=1)
             st["filter"] = f if f is not None else st["filter"]
         elif ch == ord(":"):
             st["view"] = 3
@@ -1561,7 +1627,9 @@ def _loop(win):
         elif ch == ord("r") and target:
             slug = target.slug or (target.task[3:] if target.task.startswith("tl-") else target.task)
             if _confirm(win, "Run pipeline: tl-run %s  (its own approve/reject prompts)" % slug):
-                _shell_out(win, [os.path.join(BIN, "tl-run.sh"), slug])
+                argv = [os.path.join(BIN, "tl-run.sh"), slug]
+                st["notice"] = _ran(argv, _shell_out(win, argv),
+                                    "tl-run '%s' finished — the list shows where it stopped" % slug)
             q = recompute()
         elif ch == ord("g") and target:
             if not target.task.startswith("tl-"):
@@ -1569,9 +1637,12 @@ def _loop(win):
                 # still the whole pipeline (grill → brief → spawn), which dispatches a worker.
                 if _confirm(win, "Grill '%s': tl-grill %s  (one model call; no worker is dispatched)"
                             % (target.slug, target.slug)):
-                    _shell_out(win, [os.path.join(BIN, "tl-grill.sh"), target.slug])
+                    argv = [os.path.join(BIN, "tl-grill.sh"), target.slug]
+                    st["notice"] = _ran(argv, _shell_out(win, argv),
+                                        "grilled '%s' — its questions are in the list" % target.slug)
             elif _confirm(win, "Resolve gate: tl-deliver %s  (approve/skip/fix per finding)" % target.task):
-                _shell_out(win, [os.path.join(BIN, "tl-deliver.sh"), target.task])
+                argv = [os.path.join(BIN, "tl-deliver.sh"), target.task]
+                st["notice"] = _ran(argv, _shell_out(win, argv), "delivered %s" % target.task)
             q = recompute()
 
 

@@ -125,17 +125,27 @@ if [ "$(basename "$techroot")" = ".techlead" ]; then
     if [ -f "$f" ]; then { printf '\n# from %s\n' "$(basename "$f")"; cat "$f"; } >> "$ctx"; fi
   done
 fi
-brefs="$(mktemp)"
-TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
-TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" TL_CONTEXT="$ctx" \
-  $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text bank; do
+brefs="$(mktemp)"; drv="$(mktemp)"
+# Capture the driver to a file and CHECK ITS STATUS before recording anything. Piping it straight
+# into the read loop made the pipeline's status the loop's — always 0 — so a driver that died (no
+# API key, bad model, missing binary) looked like a grill that ran and found nothing: _finalize
+# then marked the spec `specified` with zero questions, i.e. ready to dispatch. Fail closed (§3.9):
+# a grill that could not ask anything must say so and leave the spec drafted.
+if ! TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
+   TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" TL_CONTEXT="$ctx" \
+   $TL_GRILL_CMD > "$drv"; then
+  rc=$?
+  rm -f "$bodyf" "$ctx" "$brefs" "$drv"
+  tl_die "grill driver failed (exit $rc) — nothing recorded for $id; its output is above"
+fi
+while IFS="$TAB" read -r qid st src text bank; do
     [ -n "$qid" ] || continue
     case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)
     case "$src" in owner|inferred) ;; *) src=inferred;; esac
     "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" "$src" "$(date -u +%Y-%m-%d)" "$text"
     case "$bank" in ''|*[!0-9]*) ;; *) printf '%s\n' "$bank" >> "$brefs";; esac   # numeric bank ref only
-  done
-rm -f "$bodyf" "$ctx"
+  done < "$drv"
+rm -f "$bodyf" "$ctx" "$drv"
 # hits: bump — a bank question that justified an inferred answer this grill has fired (§2.6, SHAPE.md).
 # Reuse-rate is the risk-1 / D13 signal, so bump each referenced entry once and stamp its date.
 if [ -s "$brefs" ]; then bump_hits "$TL_LEAD/questions.md" $(sort -un "$brefs"); fi

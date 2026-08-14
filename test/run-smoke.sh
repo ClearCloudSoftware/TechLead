@@ -140,6 +140,11 @@ echo "== B3b: re-run after delivery is idempotent =="
 grep -q "already delivered" /tmp/rs-b3b.log || fail "B3b: not idempotent after delivery: $(cat /tmp/rs-b3b.log)"
 echo "  B3b ok — already delivered"
 
+echo "== B3c: teardown after a local-only (ff-merge) delivery needs no --force =="
+"$BIN/tl-teardown.sh" tl-add-list >/tmp/rs-b3c.log 2>&1 \
+  || fail "B3c: teardown refused a delivered ff-merge — the guard must key on 'delivered', not 'pr': $(cat /tmp/rs-b3c.log)"
+echo "  B3c ok — an ff-merged (local-only) task tore down without --force"
+
 echo "== B4: gate STOPS on unresolved findings; the regression never merges =="
 "$BIN/tl-run.sh" risky >/dev/null 2>&1 || true                       # stop at open spec
 "$BIN/tl-grill.sh" answer tl-risky q2 decided "ok" >/dev/null

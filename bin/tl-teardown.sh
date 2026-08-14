@@ -14,11 +14,14 @@ if [ "$force" != "--force" ]; then
   if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
     tl_die "refusing teardown — $id has uncommitted changes in its worktree (use --force)"
   fi
-  # guard 2: commits on tl/<id> beyond where it started, with no PR recorded = undelivered work
+  # guard 2: commits on tl/<id> beyond where it started, not yet delivered = unpushed work.
+  # tl-deliver records `delivered` for BOTH paths — pr:<url> and ff-merge:<branch> — so that is the
+  # single "this work left the worktree" signal. (Keying on `pr` alone refused every local-only/ff
+  # delivery, which is tl-new's default, forcing --force on every greenfield teardown.)
   ahead="$(git -C "$wt" rev-list --count "$base"..HEAD 2>/dev/null || echo 0)"
-  pr="$(tl_meta_get "$id" pr 2>/dev/null || true)"
-  if [ "${ahead:-0}" -gt 0 ] && [ -z "$pr" ]; then
-    tl_die "refusing teardown — tl/$id has $ahead undelivered commit(s) and no PR recorded (use --force)"
+  delivered="$(tl_meta_get "$id" delivered 2>/dev/null || true)"
+  if [ "${ahead:-0}" -gt 0 ] && [ -z "$delivered" ]; then
+    tl_die "refusing teardown — tl/$id has $ahead undelivered commit(s) (not merged or pushed) (use --force)"
   fi
 fi
 

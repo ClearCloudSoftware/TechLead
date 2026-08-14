@@ -8,6 +8,14 @@ use (§4).
 
 ## [Unreleased]
 
+### Added
+
+- **`tl-scaffold-context`** — drafts a project's `AGENTS.md` (layout, conventions, danger zones) and
+  `CONTEXT.md` (domain glossary) as real files (draft-then-approve: never commits, never overwrites),
+  closing the gap where the onboarding survey (a plan task) could only *describe* them in a report.
+  The grill now feeds the committed `AGENTS.md` + `CONTEXT.md` to its driver, so inferences use the
+  project's own vocabulary. Completes Epic 9 / #60 (`test/scaffold-context-smoke.sh`).
+
 ## [0.3.0] — 2026-08-14
 
 Per-project state, the greenfield loop end to end, and the judgment layer's reuse signal made

@@ -139,6 +139,12 @@ draft** (a test defines what "done" means, so it's yours to approve), commit it,
 It never baselines an unreviewed harness and never overwrites an existing `test.sh`. Existing repos
 with a known stack don't need it — `tl-onboard`/`tl-detect` already set `test_command`.
 
+**Onboarding docs.** `tl-scaffold-context myapp` drafts `AGENTS.md` (layout, current + deprecated
+conventions, danger zones) and `CONTEXT.md` (domain glossary) as real files, then stops. **Review
+them — the first `CONTEXT.md` especially is yours to check** — and commit. Once committed, the grill,
+review, and answer read them (a worker branches from `HEAD`), so the lead uses your project's
+vocabulary instead of guessing. It never overwrites an existing doc.
+
 > **Commit the test harness first.** `test_command` runs in the *worktree*, which a worker branches
 > from `HEAD` — so an **uncommitted** harness (or fixtures) is invisible to workers and to the gate,
 > and the baseline (run against your working tree) won't match what the gate reruns. `tl-baseline` and

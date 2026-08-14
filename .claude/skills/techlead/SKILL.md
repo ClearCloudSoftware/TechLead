@@ -67,6 +67,10 @@ is what selects it, so every command below resolves the right project from the c
 Read state to know the next step — don't hardcode an order:
 `tl-project get <name> readiness` · `tl-spec get <id> state` + `open-count` · `tl-state <id>`.
 
+0. **Onboarding docs (once per project, optional but high-value):** `tl-scaffold-context <name>` drafts
+   `AGENTS.md` (layout/conventions/danger zones) + `CONTEXT.md` (domain glossary) as real files.
+   **Show the owner and HARD-STOP — the first `CONTEXT.md` is theirs to review.** They commit them;
+   grills/reviews then use the project's vocabulary. Never overwrites existing docs.
 1. **If readiness is `survey`** (fresh project, no tests): `tl-scaffold-test <name>` — it drafts
    `test.sh` from the backlog (failing-id-per-line) and sets `test_command`. **Show the owner the
    draft and HARD-STOP — a test defines what "done" means, which is theirs to approve.** After they're

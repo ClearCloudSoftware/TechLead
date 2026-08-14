@@ -10,12 +10,17 @@ use (§4).
 
 ### Added
 
+- **`tl-scaffold-context`** — drafts a project's `AGENTS.md` (layout, conventions, danger zones) and
+  `CONTEXT.md` (domain glossary) as real files (draft-then-approve: never commits, never overwrites),
+  closing the gap where the onboarding survey (a plan task) could only *describe* them in a report.
+  The grill now feeds the committed `AGENTS.md` + `CONTEXT.md` to its driver, so inferences use the
+  project's own vocabulary. Completes Epic 9 / #60 (`test/scaffold-context-smoke.sh`).
 - **`tl-kickoff`** — greenfield project ideation as a **terminal interview**. Runs entirely from the
   shell (no Claude Code app): each turn is a discrete `claude -p` call, the conversation lives in a
-  transcript file (killable/resumable, §3.2), and the driver streams each turn so it isn't a silent
-  black box. When it has enough it drafts `CONTEXT.md` (uncommitted, no overwrite) + prints ready
-  `tl-backlog add` lines — both owner-approved. `<project>` is inferred from the current `.techlead`.
-  The greenfield complement to `tl-scaffold-context`; never writes `AGENTS.md` (`test/kickoff-smoke.sh`).
+  transcript file (killable/resumable, §3.2). When it has enough it drafts `CONTEXT.md` (uncommitted,
+  no overwrite) + prints ready `tl-backlog add` lines — both owner-approved. `<project>` is inferred
+  from the current `.techlead`. The greenfield complement to `tl-scaffold-context`; never writes
+  `AGENTS.md` (`test/kickoff-smoke.sh`).
 
 ## [0.3.0] — 2026-08-14
 

@@ -116,9 +116,18 @@ tl_log "grill: $id — inference pass over lead/questions.md"
 # The optional 5th field is the number of the lead/questions.md entry this answer was inferred from
 # (§2.6 hits: signal). Old 4-field drivers just omit it → no bump. The loop runs in a pipe subshell,
 # so bank refs are stashed in a temp file to survive to the bump step below.
+# project context (§2.7, #60): if the grill runs inside a managed repo, feed the driver the repo's own
+# AGENTS.md + CONTEXT.md (layout, conventions, danger zones, domain glossary) so inferences use the
+# project's vocabulary, not just lead/. Resolved from the .techlead parent; absent files are skipped.
+ctx="$(mktemp)"; techroot="$(dirname "$TL_DATA")"
+if [ "$(basename "$techroot")" = ".techlead" ]; then
+  for f in "$(dirname "$techroot")/AGENTS.md" "$(dirname "$techroot")/CONTEXT.md"; do
+    if [ -f "$f" ]; then { printf '\n# from %s\n' "$(basename "$f")"; cat "$f"; } >> "$ctx"; fi
+  done
+fi
 brefs="$(mktemp)"
 TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
-TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" \
+TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" TL_CONTEXT="$ctx" \
   $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text bank; do
     [ -n "$qid" ] || continue
     case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)
@@ -126,7 +135,7 @@ TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" \
     "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" "$src" "$(date -u +%Y-%m-%d)" "$text"
     case "$bank" in ''|*[!0-9]*) ;; *) printf '%s\n' "$bank" >> "$brefs";; esac   # numeric bank ref only
   done
-rm -f "$bodyf"
+rm -f "$bodyf" "$ctx"
 # hits: bump — a bank question that justified an inferred answer this grill has fired (§2.6, SHAPE.md).
 # Reuse-rate is the risk-1 / D13 signal, so bump each referenced entry once and stamp its date.
 if [ -s "$brefs" ]; then bump_hits "$TL_LEAD/questions.md" $(sort -un "$brefs"); fi

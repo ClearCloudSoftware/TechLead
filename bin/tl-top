@@ -796,7 +796,11 @@ def _draw_detail(win, r, y, ymax, data_dir):
                 break
             y = _para(win, y, ymax, 2, para) if para.strip() else y + 1
     else:
+        # decision / review / ready / blocked / failed. The row's own text is the point here — a
+        # worker's escalation question lives in it — and the table row truncates, so it has to be
+        # repeated in full before the peek tail, not replaced by it.
         y = _rule(win, y, r.task)
+        y = _para(win, y, ymax, 0, r.detail, curses.A_BOLD)
         remaining = ymax - y
         if remaining > 0 and r.fleet:
             for ln in tl_peek(r.task, remaining).splitlines()[-remaining:]:

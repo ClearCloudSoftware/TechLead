@@ -30,7 +30,9 @@ use (§4).
     findings, backlog bodies. Table rows still truncate to one line (that is what makes a table
     scannable), so every view pairs its table with a detail pane that doesn't. A block that
     outruns the space ends in `…` rather than stopping silently, and the briefing caps a long
-    list of prior answers with `+N more` so the backlog context can't be pushed off screen.
+    list of prior answers with `+N more` so the backlog context can't be pushed off screen. This
+    matters most for the row types that have no spec question behind them — a worker's escalation
+    lives only in the row's own text, so the inbox pane is the one place it can be read at all.
 - **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader
   doesn't grow a second copy of the heading awk (§3.1).
 

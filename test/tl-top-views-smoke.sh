@@ -47,6 +47,23 @@ q: q3|open|inferred|2026-08-14|What happens to the old index while the new one b
 # Add full-text search
 EOF
 
+# A worker parked on a decision, asking a LONG question. This row type keeps its text only in
+# `detail` — there is no spec question behind it — so the inbox detail pane is the one place it can
+# be read in full. Needs a live session (kill -0 on the pid) plus a stale log, which is what
+# tl-state reconciles into `needs-decision`.
+WORKER_Q="Should I reuse the existing retry helper in net/retry.go, which already handles exponential backoff but not jitter, or add jitter to it and risk changing the timing for the three callers that already depend on it?"
+mkdir -p "$TL_STATE/sessions/tl-oauth" "$TL_DATA/tl-oauth"
+sleep 120 &
+SLEEP_PID=$!
+disown 2>/dev/null || true
+trap 'kill $SLEEP_PID 2>/dev/null; rm -rf "$WORK"' EXIT
+echo "$SLEEP_PID" > "$TL_STATE/sessions/tl-oauth/pid"
+: > "$TL_STATE/sessions/tl-oauth/log"
+printf 'kind=change\npname=notes-app\n' > "$TL_STATE/tl-oauth.meta"
+printf '%s\tneeds-decision\n' "$(date +%s)" > "$TL_STATE/tl-oauth.status"
+printf 'question=%s\ndefault=yes\ntimeout=30\n' "$WORKER_Q" > "$TL_DATA/tl-oauth/ask"
+export TL_FRESH_SECS=0     # the log is stale by design, so tl-state reports the parked state
+
 cat > "$TL_LEAD/questions.md" <<'EOF'
 # questions.md
 
@@ -112,6 +129,14 @@ want(screen, "services already depending on it?", "launch: long question must WR
 if screen.count("● question") != 1:
     bad.append("launch: exactly one question row expected (q1 is answered, so it must not be a "
                "row) — got %d" % screen.count("● question"))
+
+# the fallback row types (decision/ready/review/blocked/failed) keep their text ONLY in `detail`;
+# the pane used to draw a rule and then jump straight to peek output, leaving the truncated table
+# row as the only copy.
+screen = send("j")
+want(screen, "worker asks", "a parked worker must produce a decision row")
+want(screen, "depend on it?", "inbox: a decision row's question must WRAP in the pane")
+send("k")
 
 screen = send("2")
 want(screen, "open question", "view 2 briefing")

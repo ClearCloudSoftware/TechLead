@@ -38,6 +38,11 @@ class Row:
     waiting_on: str     # the "who needs me" column; "" when working-and-fine
     rank: int           # sort/visual priority; lower = louder (stop conditions on top)
     findings: list = field(default_factory=list)
+    # every task runs in its OWN worktree on its own branch (tl-spawn, §3.11) — parallel workers are
+    # the normal case, so which checkout and which branch a row IS matters: `g` merges that branch.
+    branch: str = ""
+    worktree: str = ""
+    base: str = ""      # the sha the worktree started from, for "how far ahead is this?"
 
 
 # Visual/sort priority: lower = louder. Unresolved gate findings are the single most important
@@ -125,6 +130,9 @@ def build_fleet_model(state_dir, data_dir, state_of):
             waiting_on=waiting_on(rt, n_unresolved),
             rank=rank(rt, n_unresolved > 0),
             findings=findings,
+            branch=meta.get("branch", ""),
+            worktree=meta.get("worktree", ""),
+            base=meta.get("base", ""),
         ))
     rows.sort(key=lambda r: (r.rank, r.id))
     return rows
@@ -349,7 +357,8 @@ def _selftest():
     os.makedirs(state_dir)
     os.makedirs(data_dir)
     metas = {
-        "tl-a": "kind=change\npname=proj1\nproject=/x/proj1\nstate=working\n",
+        "tl-a": ("kind=change\npname=proj1\nproject=/x/proj1\nstate=working\n"
+                 "branch=tl/tl-a\nworktree=/x/proj1/.techlead/state/wt/tl-a\nbase=9f2a1c4d\n"),
         "tl-b": "kind=plan\npname=proj1\nstate=working\n",
         "tl-c": "kind=change\npname=proj2\nstate=working\n",
         "tl-d": "kind=plan\npname=proj1\nstate=done\n",   # torn down -> excluded
@@ -386,6 +395,19 @@ def _selftest():
         check(a.waiting_on == "2 finding(s)", "waiting_on for findings: %r" % a.waiting_on)
         check(a.kind == "change" and a.project == "proj1", "kind/project mapping")
         check(len(a.findings) == 3, "all findings attached to the row")
+    # every task has its own worktree + branch (tl-spawn, §3.11); parallel workers are the norm,
+    # so the row has to say WHICH one — `g` merges that branch, not some ambient current one.
+    check(bool(by.get("tl-a")) and by["tl-a"].branch == "tl/tl-a"
+          and by["tl-a"].worktree.endswith("/wt/tl-a") and by["tl-a"].base == "9f2a1c4d",
+          "the fleet row must carry branch/worktree/base from the meta")
+    check(bool(by.get("tl-b")) and by["tl-b"].branch == "",
+          "a meta without them is fine — the row just has nothing to show")
+    wl = worktree_lines(by["tl-a"], "/somewhere/else")
+    check(wl[0] == "worktree  .techlead/state/wt/tl-a",
+          "the worktree path is shown relative to the project, symlinked or not: %r" % wl[0])
+    check(wl[1].startswith("branch    tl/tl-a   base 9f2a1c4") and "worktree gone" in wl[1],
+          "a missing worktree is called out rather than silently blank: %r" % wl[1])
+    check(worktree_lines(by["tl-b"]) == [], "no branch/worktree recorded -> nothing to draw")
     check(bool(by.get("tl-b")) and by["tl-b"].waiting_on == "decision", "needs-decision -> 'decision'")
     check(bool(by.get("tl-e")) and by["tl-e"].waiting_on == "failed", "failed -> 'failed'")
     check(bool(by.get("tl-f")) and by["tl-f"].waiting_on == "review", "done -> 'review'")
@@ -494,9 +516,13 @@ def _selftest():
           "':findings <id>' marks unresolved with '!': %r" % [r[0] for r in mrows])
     _c, _h, mrows = modal_table("q", "not-a-thing", q, data_dir, lead_dir)
     check(len(mrows) == 1 and mrows[0][1] is None, "':q' on an un-grilled slug says so, selects nothing")
-    _c, _h, mrows = modal_table("fleet", "", q, data_dir, lead_dir)
+    _c, hdr, mrows = modal_table("fleet", "", q, data_dir, lead_dir)
     check(len(mrows) == len(q.quiet) + len([r for r in q.rows if r.fleet]),
           "':fleet' shows every live task, loud ones first")
+    check("BRANCH" in hdr and any("tl/tl-a" in r[0] for r in mrows),
+          "':fleet' must name each task's branch — that is what `g` merges: %r" % [r[0] for r in mrows])
+    check(any(" -" in r[0] for r in mrows),
+          "a task with no recorded branch shows '-' rather than a blank column")
 
     # ---- the inbox table's own layout: DETAIL wraps under its column, rows are variable height ----
     long_q = ("What happens to the old index while the new one builds, and who owns the rollback "
@@ -845,6 +871,9 @@ def _draw_detail(win, r, y, ymax, data_dir):
             _addln(win, y, 0, "%d already decided here — 2 briefing shows them in full"
                    % len(done), _bucket_attr("quiet")); y += 1
     elif r.what == "gate":
+        for ln in worktree_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
+            if y < ymax:
+                _addln(win, y, 0, ln, _bucket_attr("quiet")); y += 1
         y = _rule(win, y, "findings")
         for f in (r.fleet.findings if r.fleet else []):
             if y >= ymax:
@@ -867,6 +896,9 @@ def _draw_detail(win, r, y, ymax, data_dir):
         # repeated in full before the peek tail, not replaced by it.
         y = _rule(win, y, r.task)
         y = _para(win, y, ymax, 0, r.detail, curses.A_BOLD)
+        for ln in worktree_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
+            if y < ymax:
+                _addln(win, y, 0, ln, _bucket_attr("quiet")); y += 1
         remaining = ymax - y
         if remaining > 0 and r.fleet:
             for ln in tl_peek(r.task, remaining).splitlines()[-remaining:]:
@@ -901,6 +933,12 @@ def _draw_briefing(win, st, q, data_dir):
     if qq and y < ymax:
         _addln(win, y, 2, "state %s · source %s · asked %s" % (qq.state, qq.source, qq.at),
                _bucket_attr("quiet")); y += 2
+
+    for ln in worktree_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
+        if y < ymax:
+            _addln(win, y, 2, ln, _bucket_attr("quiet")); y += 1
+    if r.fleet:
+        y += 1
 
     if r.what == "gate" and r.fleet:
         for f in r.fleet.findings:
@@ -991,18 +1029,19 @@ def modal_table(view, arg, q, data_dir, lead_dir):
                 rows or [("lead/questions.md is empty (#49) — the bank is the asset (§2.6)", None)])
     # fleet (default)
     rows = []
+    fmt = "%-22s %-7s %-14s %-25s %s"
     for r in sorted(q.quiet, key=lambda r: r.id):
-        rows.append(("%-17s %-7s %-14s %-12s %s" % (r.id[:17], r.kind[:7], r.state[:14],
-                                                    r.project[:12], r.waiting_on),
-                     Target(r.id, "", "", "", "%s · %s · %s" % (r.kind, r.state, r.project))))
+        rows.append((fmt % (r.id[:22], r.kind[:7], r.state[:14], (r.branch or "-")[:25],
+                            r.waiting_on),
+                     Target(r.id, "", "", "", "%s on %s — %s" % (r.kind, r.branch or "?", r.project))))
     for r in q.rows:
         if r.fleet:
             f = r.fleet
-            rows.insert(0, ("%-17s %-7s %-14s %-12s %s" % (f.id[:17], f.kind[:7], f.state[:14],
-                                                           f.project[:12], f.waiting_on),
+            rows.insert(0, (fmt % (f.id[:22], f.kind[:7], f.state[:14], (f.branch or "-")[:25],
+                                   f.waiting_on),
                             Target(f.id, "", "", r.slug, r.detail)))
     return ("techlead > fleet",
-            "%-17s %-7s %-14s %-12s %s" % ("TASK", "KIND", "STATE", "PROJECT", "WAITING ON"),
+            fmt % ("TASK", "KIND", "STATE", "BRANCH", "WAITING ON"),
             rows or [("no active tasks — the fleet is idle.", None)])
 
 
@@ -1110,6 +1149,39 @@ def _backlog_cached(slug):
     if slug not in _BACKLOG_CACHE:
         _BACKLOG_CACHE[slug] = tl_backlog_show(slug)
     return _BACKLOG_CACHE[slug]
+
+
+def worktree_lines(f, project_root=""):
+    """['worktree  <path>', 'branch  <b>  base <sha>  N ahead · dirty'] for a dispatched row.
+
+    A task's worktree and branch are what `g` is about to merge, and with several workers running
+    they are the only thing telling two rows apart at a glance. `ahead`/`dirty` need git, so this
+    is called for the SELECTED row only — never for every row on the refresh timer."""
+    if not f or not (f.worktree or f.branch):
+        return []
+    # Show it relative to the project. Anchor on "/.techlead/" rather than a prefix match: the meta
+    # holds the path git canonicalised at spawn (`pwd -P`), which on macOS is /private/var/... while
+    # the same directory reached through $PWD is /var/... — a prefix test misses and you get an
+    # absolute path wide enough to be clipped.
+    path = f.worktree
+    if "/.techlead/" in path:
+        path = path[path.index("/.techlead/") + 1:]
+    elif project_root and path.startswith(project_root + "/"):
+        path = path[len(project_root) + 1:]
+    out = ["worktree  " + (path or "—")]
+    tail = "branch    %s" % (f.branch or "—")
+    if f.base:
+        tail += "   base %s" % f.base[:7]
+    if f.worktree and os.path.isdir(f.worktree):
+        n = _run_capture(["git", "-C", f.worktree, "rev-list", "--count",
+                          "%s..HEAD" % f.base]).strip() if f.base else ""
+        if n.isdigit() and int(n):
+            tail += "   %s ahead" % n
+        if _run_capture(["git", "-C", f.worktree, "status", "--porcelain"]).strip():
+            tail += "   · uncommitted"
+    else:
+        tail += "   · worktree gone"
+    return out + [tail]
 
 
 def _suspend(win, fn):

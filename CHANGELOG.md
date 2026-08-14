@@ -33,6 +33,10 @@ use (§4).
     you are choosing between them rather than one keypress away. A block that outruns the space
     ends in `…` rather than stopping silently, and the briefing caps a long list of prior answers
     with `+N more` so the backlog context can't be pushed off screen.
+  - Every task runs in its own worktree on its own branch (§3.11), so a dispatched row now **names
+    both**: a `BRANCH` column in `:fleet`, and worktree path + base sha + commits-ahead + dirty in
+    the detail pane. With several workers in flight that is what tells two rows apart, and what
+    says which branch `g` is about to merge. The git-touching parts run for the selected row only.
 - **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader
   doesn't grow a second copy of the heading awk (§3.1).
 

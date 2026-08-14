@@ -312,6 +312,13 @@ is shared, so switching view re-frames the same decision rather than losing your
 | `2` briefing | that one decision full-screen — the question, what's already decided on the item, what the backlog asked for |
 | `3` modal | `:backlog` · `:q <slug>` · `:fleet` · `:findings <id>` · `:bank` — and the only place answered questions appear, so it's where you correct one the grill inferred |
 
+Every task runs in **its own worktree on its own branch** (`tl-spawn`, §3.11), so parallel workers are
+the normal case rather than an edge one. A dispatched row names both: `:fleet` carries a `BRANCH`
+column, and the detail pane adds the worktree path (relative to the project), the base sha, how many
+commits ahead it is, and whether it has uncommitted work — the state `g` is about to merge. Those
+last two need `git`, so they are computed for the selected row only, never for the whole fleet on the
+refresh timer.
+
 The keymap is global (the same keys work in all three views) — navigation is instant, consequences
 are deliberate:
 

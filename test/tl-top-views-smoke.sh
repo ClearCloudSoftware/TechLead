@@ -59,7 +59,8 @@ disown 2>/dev/null || true
 trap 'kill $SLEEP_PID 2>/dev/null; rm -rf "$WORK"' EXIT
 echo "$SLEEP_PID" > "$TL_STATE/sessions/tl-oauth/pid"
 : > "$TL_STATE/sessions/tl-oauth/log"
-printf 'kind=change\npname=notes-app\n' > "$TL_STATE/tl-oauth.meta"
+printf 'kind=change\npname=notes-app\nbranch=tl/tl-oauth\nworktree=%s\nbase=deadbee\n' \
+  "$WORK/wt/tl-oauth" > "$TL_STATE/tl-oauth.meta"
 printf '%s\tneeds-decision\n' "$(date +%s)" > "$TL_STATE/tl-oauth.status"
 printf 'question=%s\ndefault=yes\ntimeout=30\n' "$WORKER_Q" > "$TL_DATA/tl-oauth/ask"
 export TL_FRESH_SECS=0     # the log is stale by design, so tl-state reports the parked state
@@ -136,6 +137,10 @@ if screen.count("● question") != 1:
 screen = send("j")
 want(screen, "worker asks", "a parked worker must produce a decision row")
 want(screen, "depend on it?", "inbox: a decision row's question must WRAP in the pane")
+# parallel workers each have their own worktree + branch; the row has to say which
+want(screen, "tl/tl-oauth", "inbox: a dispatched row must name its branch")
+want(screen, "worktree", "inbox: ...and its worktree")
+want(screen, "worktree gone", "a released/never-made worktree is called out, not silently blank")
 send("k")
 
 screen = send("2")
@@ -146,6 +151,9 @@ want(screen, "backlog said", "view 2 must keep room for what the backlog asked f
 want(screen, "services already depending on it?", "view 2 must wrap the question")
 screen = send("3")
 want(screen, "techlead >", "view 3 modal")
+screen = send(":fleet\n", 1.5)
+want(screen, "branch", "':fleet' must have a BRANCH column")
+want(screen, "tl/tl-oauth", "':fleet' must show the branch")
 screen = send(":q add-search\n", 1.5)
 want(screen, "q1", "view 3 :q lists answered questions too")
 want(screen, "inferred", "view 3 :q")

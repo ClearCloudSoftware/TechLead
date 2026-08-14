@@ -34,7 +34,9 @@ max="${TL_KICKOFF_MAX:-10}"; turn=0
 while :; do
   turn=$((turn+1))
   [ "$turn" -le "$max" ] || { tl_log "hit the question cap ($max) — re-run to continue if it didn't wrap up"; exit 0; }
+  printf 'tl: (thinking…)\n' >&2
   out="$("$cmd" < "$transcript")" || tl_die "kickoff driver failed"
+  [ -n "$out" ] || tl_die "the kickoff driver returned nothing (harness/adapter misconfigured?) — check TL_KICKOFF_CMD"
   case "$out" in
     *"<CONTEXT>"*)   # the lead is done: extract the docs
       ctx="$(printf '%s\n' "$out" | awk '/<CONTEXT>/{f=1;next} /<\/CONTEXT>/{f=0} f')"
@@ -52,9 +54,9 @@ while :; do
         done
       fi
       exit 0 ;;
-    *)               # a question (it streamed to the terminal as it generated); record + capture answer
+    *)               # a question: show it, record it, capture the owner's answer
+      printf '\nLEAD: %s\n> ' "$out" >&2
       printf 'LEAD: %s\n' "$out" >> "$transcript"
-      printf '\n> ' >&2
       IFS= read -r ans || { echo >&2; tl_log "paused — resume with: tl-kickoff $name"; exit 0; }
       printf 'OWNER: %s\n' "$ans" >> "$transcript"
       ;;

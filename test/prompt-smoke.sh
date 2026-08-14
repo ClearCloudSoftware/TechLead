@@ -96,6 +96,14 @@ printf '%s\n' "$out" | grep -q '^  f2  ask-user  scope-cap        src/auth.ts$' 
   || fail "empty cell in the previous row shifted this one: $out"
 [ -z "$(printf '' | tl_table "A,B")" ] || fail "empty input should render nothing, not a bare header"
 
+# Captured output must stay awk-parseable by COLUMN POSITION — `tl-cost report | awk '$1=="answer"
+# {print $2}'` is a real caller (test/soak-fixes-smoke.sh), and gum's box-drawing would shift $1
+# to "│". Stdout is not a tty here, so this is the real code path, not a stubbed one.
+out="$(printf 'answer\t1000\t200\t0.4200\n' | tl_table "CATEGORY,INPUT,OUTPUT,COST_USD")"
+case "$out" in *│*|*╭*) fail "captured table is boxed — every awk column assertion breaks";; esac
+[ "$(printf '%s\n' "$out" | awk '$1=="answer"{print $2}')" = 1000 ] || fail "column 2 not parseable: $out"
+[ "$(printf '%s\n' "$out" | awk '$1=="answer"{print $4}')" = "0.4200" ] || fail "column 4 not parseable: $out"
+
 echo "== when gum is installed: the right subcommand, and a cancel that propagates =="
 # Two defects this pins down, both found by hand at a real terminal:
 #  1. `gum write` is the multi-line textarea — it submits on ctrl-d, so pressing enter looks hung.
@@ -119,7 +127,7 @@ esac
 case "$args" in *--value=*) ;; *) fail "tl_text dropped --value (no editable default): $args";; esac
 case "$args" in *--header=*) ;; *) fail "tl_text dropped --header (question invisible): $args";; esac
 
-printf 'a\tb\n' | PATH="$WORK/fakebin:$PATH" tl_table "C1,C2" >/dev/null
+printf 'a\tb\n' | TL_DECORATE=1 PATH="$WORK/fakebin:$PATH" tl_table "C1,C2" >/dev/null
 args="$(cat "$GUM_ARGS")"
 case "$args" in
   table*--print*) ;;

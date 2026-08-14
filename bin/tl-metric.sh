@@ -19,7 +19,6 @@ case "${1:-}" in
     awk -F'\t' '
       { t[$2 SUBSEP $3]+=$4; feat[$2]=1; has[$2 SUBSEP $3]=1 }   # has[]: distinguish "no data" from 0s
       END {
-        printf "%-18s %9s %11s %8s %8s %-9s\n","feature","grill_s","approve_s","net_s","self_s","verdict"
         for (fe in feat) {
           hg=has[fe SUBSEP "grill"]; ha=has[fe SUBSEP "approve"]; hs=has[fe SUBSEP "self"]
           g=t[fe SUBSEP "grill"]; a=t[fe SUBSEP "approve"]; s=t[fe SUBSEP "self"]
@@ -29,20 +28,20 @@ case "${1:-}" in
           if (!hs)                v=""
           else if (hg && ha)      v=(net<s ? "faster ✓" : "slower ✗")
           else                    v="incomplete"   # self set but grill/approve time missing (D13: not evaluable)
-          printf "%-18s %9s %11s %8s %8s %-9s\n", fe, gs, as_, ns, ss, v
+          printf "%s\t%s\t%s\t%s\t%s\t%s\n", fe, gs, as_, ns, ss, v
         }
-      }' "$LEDGER"
+      }' "$LEDGER" | tl_table "FEATURE,GRILL_S,APPROVE_S,NET_S,SELF_S,VERDICT"
     ;;
   outcome)  # E6.4 — per-grill inferred-answer outcome (the risk-1 signal, §8.1). accept = an inferred
             # answer left standing; correct = owner overrode an inferred value (logged by tl-grill
             # answer). Reads specs via tl-spec (single owner, §3.1); folds in inferred-outcomes.tsv.
     log="$TL_DATA/inferred-outcomes.tsv"
-    printf '%-22s %8s %8s %9s\n' "grill" "inferred" "accepted" "corrected"
     for d in "$TL_DATA"/*/; do
       id="$(basename "$d")"; [ -f "$d/spec.md" ] || continue
       acc="$("$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '$3=="inferred" && $2!="open"{c++} END{print c+0}')"
       cor="$([ -f "$log" ] && awk -F'\t' -v id="$id" '$2==id{s[$3]=1} END{n=0;for(k in s)n++;print n}' "$log" || echo 0)"
-      inf=$((acc+cor)); [ "$inf" -gt 0 ] && printf '%-22s %8d %8d %9d\n' "$id" "$inf" "$acc" "$cor"
-    done ;;
+      inf=$((acc+cor)); [ "$inf" -gt 0 ] && printf '%s\t%d\t%d\t%d\n' "$id" "$inf" "$acc" "$cor"
+      true                       # a grill with nothing inferred is skipped, not a loop failure
+    done | tl_table "GRILL,INFERRED,ACCEPTED,CORRECTED" ;;
   *) tl_die "usage: tl-metric record <feature> grill|approve|self <seconds> | tl-metric report | tl-metric outcome";;
 esac

@@ -58,8 +58,10 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ] && command 
   TL_C_KEY="$(tput setaf 6 2>/dev/null || true)"
   TL_C_DIM="$(tput dim 2>/dev/null || true)"
   TL_C_0="$(tput sgr0 2>/dev/null || true)"
+  TL_DECORATE=1
 else
   TL_C_STOP=""; TL_C_OK=""; TL_C_KEY=""; TL_C_DIM=""; TL_C_0=""
+  TL_DECORATE=""
 fi
 
 TL_PROG="$(basename "$0" .sh)"; case "$TL_PROG" in tl-*) ;; *) TL_PROG=tl;; esac
@@ -71,16 +73,19 @@ tl_note() { printf '  %s%s%s\n' "$TL_C_DIM" "$*" "$TL_C_0"; }              # pat
 # tl_table "Col1,Col2,…"  <- TAB-separated rows on stdin. The single owner of tabular DISPLAY;
 # the machine-readable forms (tl-spec qlist's pipe encoding, findings.json) are untouched, so
 # nothing that parses this data goes through here.
-#   gum installed -> `gum table --print` (bordered)
-#   otherwise     -> an awk that measures each column. NOT `column -t`: BSD column silently drops
-#                    empty fields, so one null path shifts every later cell into the wrong column.
+#   watched at a terminal, gum installed -> `gum table --print` (bordered)
+#   otherwise -> an awk that measures each column. NOT `column -t`: BSD column silently drops
+#                empty fields, so one null path shifts every later cell into the wrong column.
+# The box is gated on TL_DECORATE (stdout is a tty) for the same reason as colour, and it matters
+# more here: `tl-cost report | awk '$1=="answer"{print $2}'` is a real caller, and box-drawing
+# characters would shift every field. Captured output stays whitespace-columned and parseable.
 # Buffered to a temp file first so a gum failure falls back to awk instead of eating the rows.
 # TL_NO_TABLE=1 forces the plain form — gum table truncates rather than wraps, so a long question
 # in a narrow terminal is better read unboxed.
 tl_table() {
   local cols="$1" t; t="$(mktemp)"; cat > "$t"
   [ -s "$t" ] || { rm -f "$t"; return 0; }
-  if [ -z "${TL_NO_TABLE:-}" ] && command -v gum >/dev/null 2>&1 &&
+  if [ -n "${TL_DECORATE:-}" ] && [ -z "${TL_NO_TABLE:-}" ] && command -v gum >/dev/null 2>&1 &&
      gum table --print --lazy-quotes --separator="$(printf '\t')" --columns="$cols" < "$t" 2>/dev/null
   then rm -f "$t"; return 0; fi
   awk -F'\t' -v hdr="$cols" -v k="$TL_C_KEY" -v z="$TL_C_0" '

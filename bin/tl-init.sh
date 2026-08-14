@@ -15,9 +15,11 @@ esac; done
 harness="$(tl_choose HARNESS "coding harness" "claude" claude opencode)"
 case "$harness" in
   claude)   worker="$TL_HOME/adapters/claude-worker.sh";   grill="$TL_HOME/adapters/claude-grill.sh"
-            propose="$TL_HOME/adapters/claude-grill-propose.sh"; scaffold="$TL_HOME/adapters/claude-scaffold-test.sh"; model="";;
+            propose="$TL_HOME/adapters/claude-grill-propose.sh"; scaffold="$TL_HOME/adapters/claude-scaffold-test.sh"
+            specdiff="$TL_HOME/adapters/claude-specdiff.sh"; standards="$TL_HOME/adapters/claude-standards.sh"
+            answer="$TL_HOME/adapters/claude-answer.sh"; model="";;
   opencode) worker="$TL_HOME/adapters/opencode-worker.sh"; grill="$TL_HOME/adapters/opencode-grill.sh"
-            propose=""; scaffold=""   # no opencode proposer/scaffolder yet → both fall back to by-hand
+            propose=""; scaffold=""; specdiff=""; standards=""; answer=""   # no opencode adapters yet → those axes fall back
             model="$(tl_ask MODEL "opencode model (must support tools)" "ollama/qwen3-coder:30b")";;
   *) tl_die "unknown harness: $harness (want claude|opencode)";;
 esac
@@ -34,6 +36,12 @@ mkdir -p "$(dirname "$TL_CONFIG")"
   printf 'export TL_GRILL_CMD="${TL_GRILL_CMD:-%s}"\n' "$grill"
   [ -n "$propose" ] && printf 'export TL_GRILL_PROPOSE_CMD="${TL_GRILL_PROPOSE_CMD:-%s}"\n' "$propose"
   [ -n "$scaffold" ] && printf 'export TL_SCAFFOLD_TEST_CMD="${TL_SCAFFOLD_TEST_CMD:-%s}"\n' "$scaffold"
+  # The change gate's Spec axis (tl-specdiff) is the differentiating check — decided spec answers vs the
+  # diff, not just paths. tl-gate calls it with `|| true`, so leaving TL_SPECDIFF_CMD unset silently
+  # skips it. Wire all three review/answer judges so the gate and the review/answer kinds work by default.
+  [ -n "$specdiff" ] && printf 'export TL_SPECDIFF_CMD="${TL_SPECDIFF_CMD:-%s}"\n' "$specdiff"
+  [ -n "$standards" ] && printf 'export TL_STANDARDS_CMD="${TL_STANDARDS_CMD:-%s}"\n' "$standards"
+  [ -n "$answer" ] && printf 'export TL_ANSWER_CMD="${TL_ANSWER_CMD:-%s}"\n' "$answer"
   [ -n "$model" ] && printf 'export TL_OPENCODE_MODEL="${TL_OPENCODE_MODEL:-%s}"\n' "$model"
 } > "$TL_CONFIG"
 tl_log "wrote $TL_CONFIG"

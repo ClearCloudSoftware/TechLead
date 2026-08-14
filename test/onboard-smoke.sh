@@ -28,6 +28,14 @@ grep -q 'opencode-worker' "$TL_CONFIG" || fail "instance.env did not record the 
 if grep -rq 'stub (tl-scaffold)' "$REPO/lead/" 2>/dev/null; then fail "the smoke seeded the REAL lead/ (should stay per-project/temp)"; fi
 echo "  ok — instance.env written and auto-loaded; real lead/ untouched"
 
+echo "== W2b: a claude tl-init wires the gate/review/answer judges (spec axis on by default) =="
+TL_CONFIG="$WORK/config/claude.env" TL_ANSWER_HARNESS=claude "$BIN/tl-init.sh" --yes </dev/null >/dev/null
+grep -q 'TL_SPECDIFF_CMD=.*claude-specdiff'   "$WORK/config/claude.env" || fail "W2b: claude tl-init did not wire TL_SPECDIFF_CMD — the gate's spec axis stays silently off"
+grep -q 'TL_STANDARDS_CMD=.*claude-standards' "$WORK/config/claude.env" || fail "W2b: did not wire TL_STANDARDS_CMD"
+grep -q 'TL_ANSWER_CMD=.*claude-answer'       "$WORK/config/claude.env" || fail "W2b: did not wire TL_ANSWER_CMD"
+grep -q 'TL_SPECDIFF_CMD' "$TL_CONFIG" && fail "W2b: opencode tl-init wired a specdiff adapter it has no driver for" || true
+echo "  ok — claude wires specdiff/standards/answer; opencode leaves them unset"
+
 echo "== W3: tl-onboard registers a brownfield repo + baseline =="
 APP="$WORK/app"; mkdir -p "$APP/migrations"
 printf '#!/bin/sh\necho feat-add\necho feat-done\n' > "$APP/test.sh"; chmod +x "$APP/test.sh"

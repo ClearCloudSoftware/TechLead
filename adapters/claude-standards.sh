@@ -24,10 +24,11 @@ The change diff:
 $diff
 
 Emit ONLY one tab-separated line per finding and nothing else:
-rule<TAB>detail<TAB>path
+rule<TAB>detail<TAB>path<TAB>rubric#
 - rule = standards-violation when the diff breaks a rule the documented standards state (cite the rule)
 - rule = standards-smell when it trips a baseline smell (name the smell) — always a judgement call
 - detail = one line: what + where, quoting the hunk briefly; path = the file
+- rubric# = the [N] of the review-rubric rule this finding applied, or empty for a baseline/AGENTS finding
 Report nothing for clean hunks. Skip anything automated tooling enforces."
 
 out="$(claude -p "$prompt" --output-format json --permission-mode default --max-turns 4 </dev/null)"

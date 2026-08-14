@@ -47,6 +47,26 @@ export TL_HOME TL_DATA TL_STATE TL_LEAD TL_WORKTREES   # so a spawned worker inh
 tl_log() { printf 'tl: %s\n' "$*" >&2; }
 tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }
 
+# bump_hits <lead-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry
+# (1-indexed in file order — the same numbering the grill/review adapter shows the model). The reuse
+# counter is the risk-1 / D13 signal (§2.6, SHAPE.md): a question fires on a grill, a rubric rule fires
+# on a review. Out-of-range ordinals simply don't match, so a garbled ref is a silent no-op. Single
+# owner of the hits: write, shared by tl-grill (questions.md) and tl-standards (review-rubric.md).
+bump_hits() {
+  local file="$1"; shift
+  [ -f "$file" ] || return 0
+  local ords date tmp
+  ords=" $* "; date="$(date -u +%Y-%m-%d)"; tmp="$(mktemp)"
+  awk -v ords="$ords" -v date="$date" '
+    /^### /{ sec++ }
+    /^hits:/ && index(ords, " " sec " ") > 0 {
+      sub(/hits:[[:space:]]*[0-9]+/, "hits: " ($2 + 1))
+      sub(/last:[[:space:]]*[^[:space:]].*/, "last: " date)
+    }
+    { print }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 # Harness visibility (§2.7, §3.11): a worker's worktree branches from HEAD and the gate runs there too,
 # so anything UNCOMMITTED in the project — most painfully the test harness — is invisible to both. The
 # baseline (run against the working tree) then measures something the worker/gate never see. Warn at the

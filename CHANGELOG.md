@@ -8,8 +8,37 @@ use (§4).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-14
+
+Per-project state, the greenfield loop end to end, and the judgment layer's reuse signal made
+automatic. Still Phase 0. LLM adapters draft (grill, propose, scaffold, review); the owner approves —
+nothing crosses into deciding what "correct" means without a human.
+
+### Changed
+
+- **BREAKING — per-project state.** `TL_HOME` is now the tool install only (`bin/`, `adapters/`,
+  `AGENTS.md`, `config/`); each managed repo keeps its own `data/`, `state/`, and `lead/` under
+  `<project>/.techlead/`, resolved by walking up from `$PWD` to the nearest `.techlead/` (the
+  `.claude`/`.superpowers` convention). Being *in* the project selects it — the old multi-project
+  resolution ambiguity is gone. `tl-new`/`tl-onboard` scaffold `.techlead/`; `tl-init` no longer
+  seeds `lead/`. Existing central state is not migrated. (#98; design §3.2 rewritten.)
+
 ### Added
 
+- **Grill propose-mode** — on a thin/empty `lead/questions.md`, `tl-grill propose <slug>` drafts
+  candidate questions to `data/proposals/`; the owner prunes and `tl-grill promote <slug>` seeds the
+  bank (provisional: `hits: 0`, unproven scar). `tl-run` auto-drafts at the empty-bank stop when a
+  proposer is configured. Nothing enters `lead/` without an explicit promote. (#100)
+- **`tl-scaffold-test`** — drafts a greenfield project's `test.sh` from its backlog (failing-id-per-
+  line contract) and sets `test_command`, then stops for owner review; never baselines/promotes and
+  never overwrites an existing harness (`test/scaffold-test-smoke.sh`). (#102)
+- **`tl-backlog`** — `add <slug> "<title>" [desc]` appends a validated, grill-matchable item (rejects
+  a bad or newline slug/title, no duplicates, restores a missing `# Backlog` header); `list` shows the
+  queue (`test/backlog-smoke.sh`). (#108)
+- **Automatic `hits:` reuse counter** — a grill bumps the `questions.md` entries it drew answers from,
+  and a review bumps the `review-rubric.md` rules its findings cited (the driver reports which via a
+  numbered ref; `bump_hits` in `tl-common.sh` is the single owner of the write). The D13 / risk-1
+  reuse signal is no longer hand-kept. (#107, #109)
 - **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
   trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
   superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K
@@ -18,6 +47,24 @@ use (§4).
 - **`tl-scrub`** — a deterministic deny-pattern guard that scans content entering `lead/`/`decisions/`
   for keys, tokens, credentials, and internal hostnames; on a hit it escalates for owner review and
   never strips (`test/scrub-smoke.sh`).
+
+### Fixed
+
+- **Fail closed on un-grilled work** — `tl-run` refuses to dispatch a spec with zero grilled questions
+  (an empty question bank) instead of silently spawning a worker on an empty spec. (#99)
+- **Gate fails closed on an unrunnable harness** — the change gate captured the pipe's exit status,
+  not the test command's, so a missing/broken harness read as "0 failures → pass"; it now raises a
+  blocking `test-harness-unrunnable` finding. (#105)
+- **Harness-visibility warnings** — `tl-baseline`/`tl-spawn` warn when the project tree is dirty,
+  because a worker's worktree branches from `HEAD` and can't see an uncommitted test harness. (#101)
+- **Local-only teardown** — `tl-teardown`'s delivered-guard keyed on `pr`, refusing every ff-merge
+  (local-only, tl-new's default) delivery; it now keys on `delivered`, which both delivery paths set.
+  (#104)
+- **Per-project answer corpus** — `tl-answer` still read grill specs from `$TL_HOME/data` (a line the
+  #98 migration missed); it now globs `<project>/.techlead/data`. (#104)
+- **Gate/review/answer judges wired** — `tl-init` now sets `TL_SPECDIFF_CMD` / `TL_STANDARDS_CMD` /
+  `TL_ANSWER_CMD` for the claude harness; unset, the gate's Spec axis (its differentiator) was
+  silently skipped. (#104)
 
 ## [0.2.0] — 2026-08-03
 

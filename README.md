@@ -17,7 +17,8 @@ The full pipeline runs end to end for `plan` and `change` kinds:
 backlog → grill → spec → brief → spawn → worktree → worker → watch → gate → deliver
 ```
 
-- **How to use it:** [docs/USAGE.md](docs/USAGE.md)
+- **Start a new project:** [docs/GREENFIELD.md](docs/GREENFIELD.md) — zero to one shipped feature, worked end to end
+- **Command reference:** [docs/USAGE.md](docs/USAGE.md)
 - **Tests:** plain bash smoke tests under `test/` — run `./test/smoke.sh` (and the other `*-smoke.sh`).
 
 Quick check (no agent, no tokens):

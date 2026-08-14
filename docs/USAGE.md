@@ -330,7 +330,7 @@ are deliberate:
 | `x` | reject the item (terminal, D10) | prompt for a reason, then `tl-grill reject` |
 | `e` | edit the backlog item, or the spec | `$EDITOR` (at the item's line), full-screen |
 | `n` | jump to the next waiting item | in-TUI, instant |
-| `p` | read the deliverable — the plan report, or the worker's output when there isn't one | opens it in `$PAGER` (default `less`); returns on exit |
+| `p` | read the deliverable — the plan report, or the worker's output when there isn't one | opens it in `$TL_MD_VIEWER` (else `$PAGER`, else `less`); returns on exit |
 | `g` | **grill** an un-grilled backlog item | **confirm**, then `tl-grill <slug>` — the questions land back in the inbox to answer; no worker is dispatched |
 | `g` | …or resolve the terminal gate on a dispatched task | **confirm**, then `tl-deliver <id>` for a `change` (its gate prompts approve/skip/fix per finding), or `tl-approve <id>` for a `plan` — mirroring `tl-run`'s own kind test |
 | `r` | run / resume the whole pipeline for the selected item | **confirm**, then `tl-run <slug>` in the normal terminal — this one *does* dispatch a worker |
@@ -338,7 +338,16 @@ are deliberate:
 | `?` / `q` | keys · quit | — |
 
 A finished `plan` **is** its report, so the report shows in the inbox pane and in the briefing, and
-`p` pages it in full. `g` is the row's gate-ish verb and its meanings can never collide: an item either has a spec
+`p` opens it. Reports are markdown, so a plain pager shows them as source; point `TL_MD_VIEWER` at
+a renderer to read them properly — it is deliberately separate from `$PAGER`, which also handles the
+raw session log where a markdown renderer would be wrong. **No dependency is adopted (§5)**: the
+viewer is whatever you name, and the default works with nothing installed.
+
+```sh
+export TL_MD_VIEWER="glow -w 100"     # or bat, mdcat, rich …
+```
+
+`g` is the row's gate-ish verb and its meanings can never collide: an item either has a spec
 (a `tl-` id) or it has not been grilled yet. The footer names whichever one the row under the cursor
 answers to. The full loop without leaving the TUI is **`g` grill → `d`/`l`/`s` the questions it
 raises → `r` dispatch**.
@@ -467,7 +476,8 @@ TL_APPROVE=yes bin/tl-deliver.sh af1           # gate → ff-merge onto main
 | `TL_APPROVE=yes` | Non-interactive approval (tests/automation); `TL_RESOLVE` sets the finding resolution. |
 | `TL_WATCH_INTERVAL` / `TL_FRESH_SECS` / `TL_DONE_STABLE` | Watcher tuning. |
 | `TL_TOP_INTERVAL` | `tl-top` refresh interval, in seconds (default 2). |
-| `PAGER` | Pager for `tl-top`'s `p` (peek) key (default `less`). |
+| `PAGER` | Pager for `tl-top`'s `p` key and the session-log peek (default `less`). |
+| `TL_MD_VIEWER` | Renderer for markdown deliverables in `tl-top`'s `p` (e.g. `glow -w 100`). Falls back to `$PAGER`. |
 | `TL_ANSWER_DECAY_DAYS` | Spec-answer staleness threshold (default 30). |
 
 ## Known limits (Phase 0)

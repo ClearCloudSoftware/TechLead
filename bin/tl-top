@@ -1327,10 +1327,25 @@ def _ran(argv, rc, ok):
 
 
 def _page_file(win, path):
-    """$PAGER over a file — how you actually READ a plan report rather than glimpsing its head."""
+    """Read a deliverable full-screen, through TL_MD_VIEWER (else $PAGER, else less).
+
+    Reports are markdown, and a pager shows them as plain text. TL_MD_VIEWER is a separate knob
+    from $PAGER on purpose: $PAGER also handles the raw session log, where a markdown renderer
+    would be wrong. No dependency is adopted (§5) — the viewer is whatever the operator names, and
+    the default keeps working with nothing installed:
+
+        export TL_MD_VIEWER="glow -w 100"     # or bat, mdcat, rich, …
+    """
     def go():
+        viewer = os.environ.get("TL_MD_VIEWER") or os.environ.get("PAGER") or "less"
         try:
-            subprocess.call(shlex.split(os.environ.get("PAGER") or "less") + [path])
+            subprocess.call(shlex.split(viewer) + [path])
+            if os.environ.get("TL_MD_VIEWER"):
+                # a renderer prints and exits, unlike a pager that waits — so hold the output
+                try:
+                    input("\n[enter to return] ")
+                except EOFError:
+                    pass
         except OSError:
             with open(path) as f:
                 sys.stdout.write(f.read())

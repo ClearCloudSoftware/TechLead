@@ -71,6 +71,20 @@ def want(screen, needle, label):
         bad.append("%s: expected %r on screen" % (label, needle))
 
 
+def expect(needle, label, seed="", timeout=8.0):
+    """Keep draining until `needle` appears, or give up after `timeout`.
+
+    Use this after anything that shells out. A shelled command takes a variable moment — a grill
+    driver, a metric write, a repaint — so a fixed drain window turns the assertion into a race
+    that fails a few percent of the time for no reason. Returns everything seen."""
+    acc, end = seed, time.time() + timeout
+    while needle.lower() not in acc.lower() and time.time() < end:
+        acc += drain(0.5)
+    if needle.lower() not in acc.lower():
+        bad.append("%s: expected %r within %.0fs" % (label, needle, timeout))
+    return acc
+
+
 launch = drain(3.0)
 
 if SCENARIO == "render":
@@ -122,8 +136,8 @@ elif SCENARIO == "answer":
     send("use the existing index; drop the old one behind a flag\n", 3.0)
     # THE RHYTHM: the answered row vanishes, the next open question is already selected, and `d`
     # must act on it at once. A result notice that consumes the keypress costs a key exactly here.
-    screen = send("d", 2.0)
-    want(screen, "answer q3", "d must act immediately after an answer — the notice must not eat it")
+    expect("answer q3", "d must act immediately after an answer — the notice must not eat it",
+           seed=send("d", 1.0))
     send("\x1b")                              # esc: leave q3 open, writing nothing
 
 elif SCENARIO == "report":
@@ -142,10 +156,10 @@ elif SCENARIO == "report":
     want(screen, "approve / skip / fix", "g on a plan must offer the plan gate, not the change one")
     # assert on the OUTCOME rather than the confirm text: the prompt overlaps the footer it
     # replaces, so curses re-emits only fragments of it. The shell checks meta for `approval`.
-    send("y", 2.5)                            # confirm -> tl-approve runs full-screen
-    send("\n", 2.0)                           # its "approve / skip / fix ?" -> default approve
-    screen = send("\n", 2.0)                  # dismiss [enter to return]
-    want(screen, "recorded your decision", "the outcome must be reported back in the TUI")
+    send("y", 2.0)                            # confirm -> tl-approve runs full-screen
+    send("\n", 1.5)                           # its "approve / skip / fix ?" -> default approve
+    expect("recorded your decision", "the outcome must be reported back in the TUI",
+           seed=send("\n", 1.0))
 
 elif SCENARIO == "grill-ok":
     screen = send("/backlog\n")
@@ -153,9 +167,8 @@ elif SCENARIO == "grill-ok":
     screen = send("g")
     want(screen, "tl-grill csv-export", "g on a backlog row must offer to grill it")
     want(screen, "no worker is dispatched", "...and say it does not dispatch")
-    send("y", 4.0)                            # confirm; the grill runs full-screen, then pauses
-    screen = send("\n", 2.5)                  # dismiss [enter to return]
-    want(screen, "grilled", "a successful grill must say so in the TUI")
+    send("y", 3.0)                            # confirm; the grill runs full-screen, then pauses
+    expect("grilled", "a successful grill must say so in the TUI", seed=send("\n", 1.0))
 
 elif SCENARIO == "grill-fail":
     # A FAILED command must not look like one that did nothing. This is why g/r felt broken:
@@ -165,8 +178,8 @@ elif SCENARIO == "grill-fail":
     want(screen, "dark-mode", "filter to the item whose grill will fail")
     send("g")
     send("y", 3.0)                            # confirm; the grill fails, then pauses on the shell
-    screen = send("\n", 2.5)                  # dismiss [enter to return]
-    want(screen, "exited 1", "a failed shell-out must be reported in the TUI")
+    screen = expect("exited 1", "a failed shell-out must be reported in the TUI",
+                    seed=send("\n", 1.0))
     want(screen, "nothing changed", "...and say that nothing changed")
     send(" ")
     screen = send("/\n")                      # `/` then enter clears the filter (it is not seeded)

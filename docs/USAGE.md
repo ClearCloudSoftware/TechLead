@@ -171,6 +171,16 @@ with a known stack don't need it — `tl-onboard`/`tl-detect` already set `test_
 greet.sh has hello() but no farewell(). Add farewell(name) echoing "goodbye, <name>".
 ```
 
+Edit the file directly, or use the helper (it validates the slug and refuses duplicates):
+
+```sh
+tl-backlog.sh add add-farewell "Add a farewell function to greet.sh" \
+  'greet.sh has hello() but no farewell(). Add farewell(name) echoing "goodbye, <name>".'
+tl-backlog.sh list      # show the queue
+```
+
+The `<slug>` must be bare/lowercase (`a-z0-9-`) — it becomes the task id `tl-<slug>` and branch `tl/tl-<slug>`.
+
 ### 2. Grill it into a spec
 
 ```sh

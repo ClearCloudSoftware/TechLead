@@ -4,9 +4,9 @@
 # (data/<id>/escalation.log + its ask file) becomes a candidate lead/questions.md entry, queued in
 # data/proposals/ for the owner to promote.
 #
-# DORMANT until a worker actually produces escalations: the headless worker adapter does not yet emit
-# needs-decision / write an ask file (that producer is a separate task). This loop is built and tested so
-# it is ready the moment escalations start flowing.
+# The producer now exists: adapters/claude-worker.sh escalates mid-flight (writes the ask file + emits
+# needs-decision, then resumes on the owner's answer), so resolved escalations flow into escalation.log
+# for this loop to promote. Still a no-op on a repo where no worker has had to escalate yet.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
 TAB="$(printf '\t')"

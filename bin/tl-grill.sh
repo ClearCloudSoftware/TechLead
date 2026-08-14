@@ -4,9 +4,10 @@
 # grill driver, and validates structured fields. It never reads prose to decide whether a question
 # is answered — question selection and phrasing are semantic policy in lead/questions.md.
 #
-# Subcommands: <slug> (grill) · answer ID QID STATE [text] · reject ID reason · show ID
+# Subcommands: <slug> (grill) · answer ID [QID STATE [text]] · reject ID reason · show ID ·
+#              propose SLUG · prune SLUG · promote SLUG
 set -eu
-BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
 BACKLOG="${TL_BACKLOG:-$TL_DATA/backlog.md}"
 TAB="$(printf '\t')"
 
@@ -23,28 +24,70 @@ _finalize() {  # id — set state from open-count, then report  (bump_hits lives
   # so a bare `tl-grill` run doesn't look like a clean pass when nothing was actually asked.
   [ "$total" -eq 0 ] && echo "tl: ⚠ no questions produced — $TL_LEAD/questions.md is empty (#49); the grill had nothing to ask." || true
   "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '{printf "  [%s] %-8s %-8s %s\n",$1,$2,$3,$5}'
-  [ "$open" -gt 0 ] && echo "tl: answer the delta:  tl-grill answer $id <qid> <decided|leaning|spike> [text]" || true
+  if [ "$open" -gt 0 ]; then
+    echo "tl: answer the delta:"
+    tl_kv walk "tl-grill answer $id        (one question at a time, in this terminal)"
+    tl_kv or   "tl-grill answer $id <qid> <decided|leaning|spike> [text]"
+  fi
+}
+
+# _answer id qid state [text] — THE one writer for an owner answer. Both the argument form and the
+# interactive walk go through here, so the correction log and the D13 metric can't drift apart (§3.1).
+# Empty text keeps whatever the question already says.
+_answer() {
+  local id="$1" qid="$2" st="$3" text="${4:-}" t0 cur psrc pstate
+  t0="$(date +%s)"
+  [ -f "$("$BIN/tl-spec.sh" path "$id")" ] || tl_die "no spec for $id"
+  cur="$("$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v q="$qid" '$1==q{print;exit}')"
+  [ -n "$cur" ] || tl_die "no such question $qid in $id"
+  case "$st" in decided|leaning|open|spike) ;; *) tl_die "answer_state must be decided|leaning|open|spike";; esac
+  [ -n "$text" ] || text="$(printf '%s' "$cur" | awk -F'|' '{print $5}')"
+  # E6.4 risk-1 data (§2.6, §8.1): overriding an inferred *value* (not an open delta) is a labeled
+  # correction — log it. accepts are latent (source stays `inferred`); tl-metric outcome folds both.
+  psrc="$(printf '%s' "$cur" | awk -F'|' '{print $3}')"; pstate="$(printf '%s' "$cur" | awk -F'|' '{print $2}')"
+  case "$psrc:$pstate" in
+    inferred:decided|inferred:leaning|inferred:spike)
+      printf '%s\t%s\t%s\tcorrect\t%s\n' "$(date -u +%Y-%m-%d)" "$id" "$qid" "$pstate->$st" \
+        >> "$TL_DATA/inferred-outcomes.tsv" ;;
+  esac
+  "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" owner "$(date -u +%Y-%m-%d)" "$text"
+  "$BIN/tl-metric.sh" record "$id" grill "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
+}
+
+# _answer_loop id — walk the OPEN questions one at a time in the terminal, instead of making the owner
+# retype `tl-grill answer <id> <qid> <state> "..."` per question. Mechanics only: it presents the
+# questions the grill produced and records what the owner says. It never decides an answer itself.
+_answer_loop() {
+  local id="$1" openf n=0 qid cur_st cur_src cur_at cur_text st text
+  # No tty = no owner. Fail closed (§3.9) rather than bulk-accepting the inferred answers: a silent
+  # "decided" on every open question is exactly the rubber stamp the grill exists to prevent.
+  [ -t 0 ] || tl_die "no tty for the interactive walk — use: tl-grill answer $id <qid> <decided|leaning|spike> [text]"
+  openf="$(mktemp)"
+  "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' '$2=="open"' > "$openf"
+  [ -s "$openf" ] || { rm -f "$openf"; tl_log "no open questions in $id — nothing to answer."; return 0; }
+  # Read the snapshot on fd 4: _answer rewrites spec.md as we go, and stdin has to stay the terminal
+  # so the prompts below can read it.
+  while IFS='|' read -r qid cur_st cur_src cur_at cur_text <&4; do
+    [ -n "$qid" ] || continue
+    n=$((n+1))
+    printf '\n%s[%s]%s %s\n' "$TL_C_KEY" "$qid" "$TL_C_0" "$cur_text" >&2
+    # TL_YES is the WIZARDS' "take every default" switch. Letting it reach here would stamp every
+    # open question `decided` with the inferred text — the exact rubber stamp the guard above refuses.
+    # Blank it for the prompts; TL_ANSWER_<KEY> is the deliberate per-question override.
+    st="$(TL_YES= tl_choose "GRILL_${qid}_STATE" "state" decided decided leaning spike open)"
+    text="$(TL_YES= tl_text "GRILL_${qid}_TEXT" "your answer" "$cur_text")"
+    _answer "$id" "$qid" "$st" "$text"
+  done 4< "$openf"
+  rm -f "$openf"
+  tl_log "recorded $n answer(s) for $id"
 }
 
 case "${1:-}" in
-  answer)  # answer ID QID STATE [text...]
-    id="${2:?}"; qid="${3:?}"; st="${4:?}"; shift 4 || true
-    t0="$(date +%s)"
-    [ -f "$("$BIN/tl-spec.sh" path "$id")" ] || tl_die "no spec for $id"
-    cur="$("$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v q="$qid" '$1==q{print;exit}')"
-    [ -n "$cur" ] || tl_die "no such question $qid in $id"
-    case "$st" in decided|leaning|open|spike) ;; *) tl_die "answer_state must be decided|leaning|open|spike";; esac
-    text="${*:-$(printf '%s' "$cur" | awk -F'|' '{print $5}')}"
-    # E6.4 risk-1 data (§2.6, §8.1): overriding an inferred *value* (not an open delta) is a labeled
-    # correction — log it. accepts are latent (source stays `inferred`); tl-metric outcome folds both.
-    psrc="$(printf '%s' "$cur" | awk -F'|' '{print $3}')"; pstate="$(printf '%s' "$cur" | awk -F'|' '{print $2}')"
-    case "$psrc:$pstate" in
-      inferred:decided|inferred:leaning|inferred:spike)
-        printf '%s\t%s\t%s\tcorrect\t%s\n' "$(date -u +%Y-%m-%d)" "$id" "$qid" "$pstate->$st" \
-          >> "$TL_DATA/inferred-outcomes.tsv" ;;
-    esac
-    "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" owner "$(date -u +%Y-%m-%d)" "$text"
-    "$BIN/tl-metric.sh" record "$id" grill "$(( $(date +%s) - t0 ))" || true   # D13 input (E1.5)
+  answer)  # answer ID [QID STATE [text...]]  — without QID, walk the open questions interactively
+    id="${2:?usage: tl-grill answer ID [QID STATE [text]]}"
+    if [ "$#" -lt 4 ]; then _answer_loop "$id"; _finalize "$id"; exit 0; fi
+    qid="$3"; st="$4"; shift 4 || true
+    _answer "$id" "$qid" "$st" "${*:-}"
     _finalize "$id"; exit 0 ;;
   reject)  # reject ID reason...  — terminal "don't build this" (D10, §7.3)
     id="${2:?}"; shift 2 || true; reason="${*:-unspecified}"
@@ -68,7 +111,42 @@ case "${1:-}" in
     TL_PROP_SOURCE="backlog item '$slug'" \
       "$BIN/tl-propose.sh" question "$slug" "$bodyf"
     rm -f "$bodyf"
-    echo "tl: candidates for '$slug' — prune the ones you don't want, then: tl-grill promote $slug"
+    echo "tl: candidates for '$slug' — drop the ones you don't want, then promote:"
+    tl_kv prune "tl-grill prune $slug     (pick them in the terminal)"
+    tl_kv then  "tl-grill promote $slug"
+    exit 0 ;;
+  prune)   # prune SLUG — pick which drafted candidates survive, in the terminal.
+    # `promote` has always taken "whatever '### ' headings the owner left in the file", which made
+    # curation an editor chore. This is the same operation as a multi-select, so offer it as one and
+    # rewrite the proposal in place. Still owner-only, still nothing written into lead/ (that's promote).
+    slug="${2:?usage: tl-grill prune <backlog-slug>}"
+    prop="$TL_DATA/proposals/question-$slug.md"
+    [ -f "$prop" ] || tl_die "no proposal for '$slug' at ${prop#"$TL_DATA"/} — run: tl-grill propose $slug"
+    # A slug has dashes; env-var keys can't. Sanitise once and use the same key for both the
+    # scripted-override check and the picker, so TL_ANSWER_GRILL_PRUNE_<SLUG> drives it end to end.
+    pkey="GRILL_PRUNE_$(printf '%s' "$slug" | tr -c 'A-Za-z0-9' '_' | tr 'a-z' 'A-Z')"
+    eval "pov=\${TL_ANSWER_${pkey}:-}"
+    [ -n "$pov" ] || [ -t 0 ] || tl_die "no tty — edit $prop by hand, then: tl-grill promote $slug"
+    cands="$(mktemp)"; awk '/^### /{sub(/^### /,"");print}' "$prop" > "$cands"
+    [ -s "$cands" ] || { rm -f "$cands"; tl_die "no '### ' candidates in ${prop#"$TL_DATA"/} (already pruned?)"; }
+    keep="$(mktemp)"
+    cand_arr=()                                  # one arg per candidate — questions contain spaces
+    while IFS= read -r line; do [ -n "$line" ] && cand_arr+=("$line"); done < "$cands"
+    tl_pick_many "$pkey" "keep which questions?" "${cand_arr[@]}" > "$keep"
+    kept="$(awk 'END{print NR+0}' "$keep")"
+    if [ "$kept" -eq 0 ]; then
+      rm -f "$cands" "$keep"; tl_log "kept nothing — left $prop untouched. Re-run, or delete it."; exit 0
+    fi
+    # Drop each unkept '### ' section (heading + body) but leave the header and '## ' sections alone.
+    tmp="$(mktemp)"
+    awk 'BEGIN{keep=1}                       # the file header + triggering case are not candidates
+         NR==FNR{K[$0]=1;next}
+         /^### /{ keep=(substr($0,5) in K) }
+         /^## /{ keep=1 }                    # "## " never matches "### " — section headings survive
+         keep' "$keep" "$prop" > "$tmp" && mv "$tmp" "$prop"
+    rm -f "$cands" "$keep"
+    tl_log "kept $kept candidate(s) in ${prop#"$TL_DATA"/}"
+    echo "tl: now promote them into lead/questions.md:  tl-grill promote $slug"
     exit 0 ;;
   promote) # promote SLUG — append the surviving candidates to lead/questions.md, then archive.
     # Owner-driven (the one write into lead/, and only after the owner pruned the proposal). Proposed

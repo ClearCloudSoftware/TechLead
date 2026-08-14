@@ -343,8 +343,9 @@ And it stops:
 
 ```
 tl-run: STOP — no questions in the bank for 'add-habit'; I drafted candidates for you to curate.
-  candidates: .techlead/data/proposals/question-add-habit.md
-  next: prune the ones you don't want, then:  tl-grill promote add-habit  →  tl-run add-habit
+  .techlead/data/proposals/question-add-habit.md
+  prune:  tl-grill prune add-habit      (pick the keepers in the terminal)
+  then:   tl-grill promote add-habit  →  tl-run add-habit
 ```
 
 **This stop is the product, not an error.** The grill applies *your* question bank — the questions
@@ -382,6 +383,7 @@ write a real `_scar:_` line when one first catches something, and delete any tha
 
 ```sh
 tl-grill.sh propose add-habit     # draft candidates without going through tl-run
+tl-grill.sh prune   add-habit     # multi-select which candidates survive (same as editing the file)
 tl-grill.sh promote add-habit     # append survivors to lead/questions.md, archive the proposal
 ```
 
@@ -421,10 +423,13 @@ what it can from the record (`source: inferred`) and marks the rest `open`.
 ```
 tl-run: STOP — spec 'tl-add-habit' is 'drafted' with 1 open question(s); not dispatching.
   open [q3] Where does the data live, and what happens when it's missing?
-  answer:  tl-grill answer tl-add-habit <qid> <decided|leaning|spike> [text]
+  answer: tl-grill answer tl-add-habit        (walks the open ones in the terminal)
+  or:     tl-grill reject tl-add-habit <reason>
+  then:   tl-run add-habit
 ```
 
 ```sh
+tl-grill.sh answer tl-add-habit   # prompts per open question — pick a state, type the answer
 tl-grill.sh answer tl-add-habit q3 decided "\$HABITS, default ./habits.txt; create on first write"
 tl-run.sh add-habit
 ```
@@ -681,7 +686,7 @@ All 41 scripts in `bin/`. Bold entries are the greenfield path.
 
 | | |
 |---|---|
-| **`tl-grill`** | grill a slug · `answer` · `reject` · `show` · `propose` · **`promote`** |
+| **`tl-grill`** | grill a slug · `answer` · `reject` · `show` · `propose` · `prune` · **`promote`** |
 | `tl-spec` | single owner of `spec.md` — `init`/`get`/`set`/`qset`/`qlist`/`open-count`/`path` |
 | `tl-brief` | spec → brief; refuses unspecified, open-question, or stale-answer specs |
 | `tl-propose` | shared propose-not-write machinery → `data/proposals/`, never `lead/` |

@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# prompt-smoke.sh — the interactive prompt helpers (tl-wizard) and the one command built on them
+# (tl-grill prune). No tty here, so the two paths that a terminal would exercise are forced by
+# stubbing tl_noninteractive — what's under test is the answer PARSING, not whether isatty works.
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"; BIN="$REPO/bin"
+fail() { echo "FAIL: $1"; exit 1; }
+WORK="$(mktemp -d)"
+export TL_HOME="$REPO" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_WORKTREES="$WORK/state/wt"
+cleanup() { rm -rf "$WORK"; }; trap cleanup EXIT
+mkdir -p "$TL_DATA"
+
+. "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
+
+echo "== colour is off when stdout is not a tty =="
+[ -z "$TL_C_STOP" ] || fail "colour leaked into non-tty output"
+                                         # $0 here is not a tl-* script, so the prefix falls back to "tl"
+[ "$(tl_stop "x")" = "tl: STOP — x" ] || fail "tl_stop plain form: $(tl_stop x)"
+[ "$(tl_kv fix "do the thing")" = "  fix:    do the thing" ] || fail "tl_kv plain form: '$(tl_kv fix "do the thing")'"
+
+echo "== non-interactive takes the stated default =="
+[ "$(tl_text K "prompt" "the default")" = "the default" ] || fail "tl_text default"
+[ "$(tl_pick_many K "prompt" a b c | tr '\n' ',')" = "a,b,c," ] || fail "tl_pick_many keeps all by default"
+
+echo "== TL_ANSWER_<KEY> overrides, interactive or not =="
+[ "$(TL_ANSWER_K=typed tl_text K "prompt" "the default")" = typed ] || fail "tl_text override"
+[ "$(TL_ANSWER_K='a;c' tl_pick_many K "prompt" a b c | tr '\n' ',')" = "a,c," ] || fail "tl_pick_many override"
+
+echo "== forced-interactive: answers are parsed =="
+tl_noninteractive() { return 1; }        # stub: pretend stdin is a terminal
+
+[ "$(echo hello | tl_text K "prompt" "the default" 2>/dev/null)" = hello ] || fail "tl_text reads the typed line"
+[ "$(echo '' | tl_text K "prompt" "the default" 2>/dev/null)" = "the default" ] || fail "tl_text empty keeps the default"
+
+got="$(echo '1 3' | tl_pick_many K "prompt" a b c 2>/dev/null | tr '\n' ',')"
+[ "$got" = "a,c," ] || fail "tl_pick_many by number: $got"
+got="$(echo '' | tl_pick_many K "prompt" a b c 2>/dev/null | tr '\n' ',')"
+[ "$got" = "a,b,c," ] || fail "tl_pick_many empty keeps all: $got"
+got="$(echo '9 zz 2' | tl_pick_many K "prompt" a b c 2>/dev/null | tr '\n' ',')"
+[ "$got" = "b," ] || fail "tl_pick_many ignores junk and out-of-range: $got"
+got="$(echo 2 | tl_choose K "prompt" a a b c 2>/dev/null)"
+[ "$got" = b ] || fail "tl_choose by number: $got"
+
+echo "== tl-grill prune rewrites the proposal, keeping only the picks =="
+mkdir -p "$TL_DATA/proposals"
+cat > "$TL_DATA/proposals/question-rotate-creds.md" <<'EOF'
+# Candidate question — for your review (NOT yet in lead/)
+
+preamble line that must survive
+
+## Triggering case
+
+backlog item 'rotate-creds'
+
+## Drafted candidate (lead/questions.md)
+
+### What is the rollback path?
+body of the first question
+
+### How do we page someone?
+body of the second question
+
+### What does done mean?
+body of the third question
+EOF
+
+TL_ANSWER_GRILL_PRUNE_ROTATE_CREDS='What is the rollback path?;What does done mean?' \
+  "$BIN/tl-grill.sh" prune rotate-creds >/dev/null
+prop="$TL_DATA/proposals/question-rotate-creds.md"
+n="$(grep -c '^### ' "$prop")"
+[ "$n" -eq 2 ] || fail "expected 2 surviving candidates, got $n"
+grep -q '^### What is the rollback path?' "$prop" || fail "kept candidate was dropped"
+grep -q '^### What does done mean?' "$prop" || fail "kept candidate was dropped"
+grep -q 'How do we page someone' "$prop" && fail "dropped candidate survived"
+grep -q 'body of the second question' "$prop" && fail "dropped candidate's body survived"
+grep -q 'body of the first question' "$prop" || fail "kept candidate's body was dropped"
+grep -q 'preamble line that must survive' "$prop" || fail "file preamble was dropped"
+grep -q '^## Triggering case' "$prop" || fail "'## ' section heading was dropped"
+
+echo "== promote then takes exactly the survivors =="
+export TL_LEAD="$WORK/lead"; mkdir -p "$TL_LEAD"
+"$BIN/tl-grill.sh" promote rotate-creds >/dev/null 2>&1
+n="$(grep -c '^### ' "$TL_LEAD/questions.md")"
+[ "$n" -eq 2 ] || fail "expected 2 questions promoted into lead/, got $n"
+
+echo "== an exec that probes /dev/tty must not silence stderr for the rest of the script =="
+# `exec 3</dev/tty 2>/dev/null` applies BOTH redirections to the shell permanently — the gate's
+# "blocked: N finding(s) unresolved" refusal then vanished for exactly the owner who was sitting at
+# a terminal. The braces are load-bearing; assert nobody drops them again.
+cat > "$WORK/leak.sh" <<'SH'
+#!/usr/bin/env bash
+if { exec 3</dev/null; } 2>/dev/null; then echo survived >&2; fi
+SH
+chmod +x "$WORK/leak.sh"
+[ "$("$WORK/leak.sh" 2>&1 1>/dev/null)" = survived ] || fail "grouped exec still swallows stderr"
+grep -qE 'elif \{ exec 3</dev/tty; \} 2>/dev/null' "$BIN/tl-gate.sh" \
+  || fail "tl-gate.sh lost the grouped exec — stderr after it goes to /dev/null"
+
+echo "== tl-grill answer with no qid refuses without a tty (fail closed) =="
+"$BIN/tl-grill.sh" answer tl-nope </dev/null >/dev/null 2>&1 && fail "interactive walk ran with no tty"
+
+echo "PASS: prompt helpers, prune multi-select, fail-closed walk"

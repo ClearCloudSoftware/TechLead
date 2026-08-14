@@ -5,7 +5,7 @@
 # (tl-classify, #55); an empty rubric fails closed to `ask-user`. Exits non-zero while any finding is unresolved or marked `fix`.
 # tl: `eval` on operator test_command — trusted registry only; assumes no spaces in changed paths
 set -eu
-BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
 TAB="$(printf '\t')"
 id="${1:?usage: tl-gate ID}"
 [ "$(tl_meta_get "$id" kind)" = change ] || tl_die "gate is for change tasks"
@@ -84,10 +84,21 @@ if [ "$count" -gt 0 ]; then
   jq -r '.[]|"  ["+.id+"] "+.rule+": "+.detail' "$findings"
   if [ "${TL_APPROVE:-}" = "yes" ]; then
     jq --arg r "${TL_RESOLVE:-approve}" 'map(.resolved=$r)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
-  elif exec 3</dev/tty 2>/dev/null; then
+  # The braces matter: `exec 3</dev/tty 2>/dev/null` applies BOTH redirections to the current shell
+  # permanently, so every later stderr write — including the "gate blocked" refusal — went to
+  # /dev/null once the interactive branch was taken. Grouping scopes the silencing to the exec.
+  elif { exec 3</dev/tty; } 2>/dev/null; then
     for fid in $(jq -r '.[].id' "$findings"); do
-      printf 'resolve [%s] approve/skip/fix? [approve] ' "$fid"
-      read -r a <&3 || a=approve; a="${a:-approve}"
+      # Re-show the finding at the moment of the decision — the list was printed once, findings ago.
+      jq -r --arg i "$fid" '.[]|select(.id==$i)|"\n["+.id+"] "+.rule+": "+.detail' "$findings" >&2
+      # Prompt via the shared helper (gum/fzf picker when installed, numbered menu otherwise), reading
+      # the controlling tty on fd 3 — NOT stdin, which the caller may have piped. TL_ANSWER_RESOLVE_<fid>
+      # can pre-answer a single finding; TL_APPROVE=yes above still owns the bulk non-interactive path.
+      # TL_YES blanked deliberately: it is the wizards' "take every default" switch, and a stray one
+      # in the operator's shell would approve every finding here without asking. TL_APPROVE above is
+      # the gate's own explicit bulk switch — the only way to resolve findings without a human.
+      a="$(TL_YES= tl_choose "RESOLVE_$fid" "resolve [$fid]" approve approve skip fix <&3)"
+      a="${a:-approve}"
       jq --arg i "$fid" --arg a "$a" 'map(if .id==$i then .resolved=$a else . end)' "$findings" > "$findings.t" && mv "$findings.t" "$findings"
     done
     exec 3<&-

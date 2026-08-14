@@ -25,7 +25,7 @@ Quick check (no agent, no tokens):
 
 ```sh
 export TL_HOME="$PWD"
-for t in smoke watch-smoke change-smoke grill-smoke; do ./test/$t.sh || break; done
+for t in smoke watch-smoke change-smoke grill-smoke prompt-smoke; do ./test/$t.sh || break; done
 ```
 
 ## Where the plan lives

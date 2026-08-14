@@ -40,3 +40,42 @@ tl_choose() {  # KEY "prompt" default opt1 opt2 ... -> chosen on stdout (gum/fzf
   i=1; for o in "$@"; do [ "$i" = "$pick" ] && { printf '%s\n' "$o"; return 0; }; i=$((i+1)); done
   printf '%s\n' "$def"                               # out of range -> default
 }
+
+tl_text() {  # KEY "prompt" "default" -> free text on stdout (gum write if present, else one line)
+  # The point is to answer WITHOUT an editor: gum gives a real multi-line box, the fallback gives a
+  # single readline-backed line. `read -e -i` (pre-filled editable default) would be nicer but needs
+  # bash 4+; macOS ships 3.2, so the default is shown in the prompt and empty input keeps it.
+  local key="$1" prompt="$2" def="$3" ov ans
+  eval "ov=\${TL_ANSWER_${key}:-}"
+  [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
+  tl_noninteractive && { printf '%s\n' "$def"; return 0; }
+  if command -v gum >/dev/null 2>&1 &&
+     ans="$(gum write --width 78 --placeholder "$prompt" --value "$def" 2>/dev/null)"; then
+    printf '%s\n' "${ans:-$def}"; return 0                # gum absent/cancelled/older -> plain prompt
+  fi
+  printf 'tl: %s\n' "$prompt" >&2
+  printf '    %s[enter keeps: %s]%s\n> ' "$TL_C_DIM" "$def" "$TL_C_0" >&2
+  IFS= read -r ans || ans=""
+  printf '%s\n' "${ans:-$def}"
+}
+
+tl_pick_many() {  # KEY "prompt" opt1 opt2 ... -> the KEPT options, one per line. Default: keep all.
+  # Multi-select is what "open the file and delete the lines you don't want" actually is.
+  # TL_ANSWER_<KEY> takes a semicolon-separated list of literal options.
+  local key="$1" prompt="$2"; shift 2
+  local ov; eval "ov=\${TL_ANSWER_${key}:-}"
+  [ -n "$ov" ] && { printf '%s\n' "$ov" | tr ';' '\n'; return 0; }
+  tl_noninteractive && { printf '%s\n' "$@"; return 0; }
+  if command -v gum >/dev/null 2>&1; then gum choose --no-limit --header="$prompt" "$@"; return 0; fi
+  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --multi --prompt="$prompt> "; return 0; fi
+  local i=1 o n pick                                 # plain fallback: numbered list, keep-by-number
+  for o in "$@"; do printf '  %s%d)%s %s\n' "$TL_C_KEY" "$i" "$TL_C_0" "$o" >&2; i=$((i+1)); done
+  printf 'tl: %s — numbers to KEEP, space-separated [all]: ' "$prompt" >&2
+  IFS= read -r pick || pick=""
+  [ -z "$pick" ] && { printf '%s\n' "$@"; return 0; }
+  for n in $pick; do
+    case "$n" in ''|*[!0-9]*) continue;; esac        # ignore junk rather than guess
+    [ "$n" -ge 1 ] && [ "$n" -le $# ] && printf '%s\n' "${!n}"
+  done
+  return 0
+}

@@ -10,6 +10,26 @@ use (§4).
 
 ### Added
 
+- **Answer the grill in the terminal** — `tl-grill answer <id>` with no qid walks the open questions
+  one at a time (pick a state, type the answer) instead of retyping the full command per question,
+  and `tl-grill prune <slug>` multi-selects which proposed questions survive instead of editing the
+  proposal file by hand. Both go through the existing single writer, so the correction log and the
+  D13 metric are unchanged. No tty → both refuse rather than rubber-stamp (`test/prompt-smoke.sh`).
+- **`tl_text` / `tl_pick_many` prompt helpers** in `tl-wizard.sh`, on the same optional-enhancement
+  seam as `tl_choose`: [`gum`](https://github.com/charmbracelet/gum) → `fzf` → numbered menu. Neither
+  is required. Gate finding resolution now uses the shared picker too.
+- **Colourised output** — `tl_stop`/`tl_ok`/`tl_kv`/`tl_note` in `tl-common.sh` give refusals,
+  successes, and next-step lines distinct weight. Only when stdout is a terminal; `NO_COLOR` honoured,
+  so piped and captured output is byte-identical to before.
+
+### Fixed
+
+- **`tl-gate` silently discarded its own refusal.** `exec 3</dev/tty 2>/dev/null` applies *both*
+  redirections to the shell permanently, so once the interactive resolve branch was taken every
+  later stderr write went to `/dev/null` — including `gate blocked: N finding(s) unresolved`. An
+  owner sitting at a terminal who marked a finding `fix` got exit 3 and no explanation. The exec is
+  now brace-grouped so the silencing is scoped to it.
+
 - **Memory-hygiene conventions for `lead/`** — a consolidation routine (four tiers, a cadence
   trigger, promote/merge/**delete**) and a write-time contradiction check (keep/merge/supersede,
   superseded rules removed) in `lead/SHAPE.md`; plus a context-budget ceiling (~200 lines / ~20K

@@ -47,6 +47,27 @@ export TL_HOME TL_DATA TL_STATE TL_LEAD TL_WORKTREES   # so a spawned worker inh
 tl_log() { printf 'tl: %s\n' "$*" >&2; }
 tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }
 
+# Presentation (single owner: this file). Every tl-* line used to land with identical weight — a
+# refusal read like a progress note. Colour separates "you must act" from "for your information".
+# Gated on stdout being a tty, so captured output (`x="$(tl-spec.sh path ...)"`, pipes, the smoke
+# tests' logs) is byte-identical to before — no escape codes ever reach a file or a grep.
+# NO_COLOR (https://no-color.org) and TERM=dumb turn it off.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ] && command -v tput >/dev/null 2>&1; then
+  TL_C_STOP="$(tput setaf 1 2>/dev/null || true)$(tput bold 2>/dev/null || true)"
+  TL_C_OK="$(tput setaf 2 2>/dev/null || true)"
+  TL_C_KEY="$(tput setaf 6 2>/dev/null || true)"
+  TL_C_DIM="$(tput dim 2>/dev/null || true)"
+  TL_C_0="$(tput sgr0 2>/dev/null || true)"
+else
+  TL_C_STOP=""; TL_C_OK=""; TL_C_KEY=""; TL_C_DIM=""; TL_C_0=""
+fi
+
+TL_PROG="$(basename "$0" .sh)"; case "$TL_PROG" in tl-*) ;; *) TL_PROG=tl;; esac
+tl_stop() { printf '%s%s: STOP%s — %s\n' "$TL_C_STOP" "$TL_PROG" "$TL_C_0" "$*"; }   # owner must act
+tl_ok()   { printf '%s%s: %s%s\n' "$TL_C_OK" "$TL_PROG" "$*" "$TL_C_0"; }            # it worked
+tl_kv()   { printf '  %s%-7s%s %s\n' "$TL_C_KEY" "$1:" "$TL_C_0" "$2"; }   # cause:/fix:/next: lines
+tl_note() { printf '  %s%s%s\n' "$TL_C_DIM" "$*" "$TL_C_0"; }              # paths, provenance
+
 # bump_hits <lead-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry
 # (1-indexed in file order — the same numbering the grill/review adapter shows the model). The reuse
 # counter is the risk-1 / D13 signal (§2.6, SHAPE.md): a question fires on a grill, a rubric rule fires

@@ -24,6 +24,20 @@ use (§4).
   output stays whitespace-columned, so `tl-cost report | awk '$1=="worker"{print $2}'` still parses;
   the machine-readable forms (`tl-spec qlist`'s pipe encoding, `findings.json`) are untouched.
   `TL_NO_TABLE=1` forces the plain form; gum truncates long cells rather than wrapping.
+- **`tl_spin`** — the steps that used to go silent for tens of seconds now show a spinner: the test
+  suite in `tl-baseline` and `tl-gate`, the grill driver, the proposer, the answer engine, and the
+  spec-axis judge. Callers keep their own redirections inside the command, so nothing that gets
+  parsed passes through the spinner.
+- **`tl_page`** — `tl-approve`, `tl-grill show`, `tl-review`, and `tl-answer` page their output when
+  it does not fit, and render markdown through `glow`/`gum format`. `tl-approve` in particular used
+  to `cat` a long report and then print the approve/skip/fix prompt below it, so the evidence and the
+  decision were never on screen together.
+- **Fuzzy pickers for omitted arguments** — `tl-peek`, `tl-approve`, `tl-deliver`, `tl-teardown` pick
+  a task id from the live fleet; `tl-run` picks a backlog slug; `tl-onboard` browses for a repo
+  directory; `tl-new` prompts for a name. Non-interactively they still print usage and exit.
+- **Read-only findings navigator** in `tl-gate` when a gate produces more than five findings —
+  select a row to read it in full. Deliberately *not* a resolve UI: §2.3.1 makes that gate a
+  one-at-a-time chokepoint, and a selectable list is how bulk-approving starts.
 - **Colourised output** — `tl_stop`/`tl_ok`/`tl_kv`/`tl_note` in `tl-common.sh` give refusals,
   successes, and next-step lines distinct weight. Only when stdout is a terminal; `NO_COLOR` honoured,
   so piped and captured output is byte-identical to before.

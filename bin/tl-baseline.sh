@@ -11,7 +11,9 @@ cmd="$("$BIN/tl-project.sh" get "$name" test_command)"  || tl_die "no test_comma
 out="$TL_DATA/projects/$name.baseline"
 
 echo "tl: capturing baseline for $name  ($cmd)"
-( cd "$path" && eval "$cmd" ) 2>/dev/null | sort -u > "$out" || true
+# Redirections stay inside the command so the spinner has nothing to swallow or merge (see tl_spin).
+tl_spin "running the test suite…" \
+  sh -c "cd '$path' && { $cmd; } 2>/dev/null | sort -u > '$out'" || true
 "$BIN/tl-project.sh" set "$name" baseline "$out"
 "$BIN/tl-project.sh" set "$name" baseline_at "$(date -u +%Y-%m-%d)"
 echo "tl: baseline recorded — $(grep -c . "$out" 2>/dev/null || echo 0) known-failing test(s)"

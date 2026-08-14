@@ -15,6 +15,7 @@ while [ $# -gt 0 ]; do case "$1" in
   -*) tl_die "unknown arg: $1";;
   *) name="$1"; shift;;
 esac; done
+[ -n "$name" ] || name="$(tl_ask NEW_NAME "new project name (a bare directory name)" "" || true)"
 [ -n "$name" ] || tl_die "usage: tl-new <name>"
 case "$name" in */*|.*) tl_die "name must be a bare directory name (got: $name)";; esac
 

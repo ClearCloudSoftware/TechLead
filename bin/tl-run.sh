@@ -12,11 +12,12 @@
 # After spawning it hands supervision to tl-watch and RETURNS — it never babysits the worker, and it
 # never auto-answers an open question or auto-resolves a finding.
 set -eu
-BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"
+BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-wizard.sh"
 slugify() { printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//'; }
 
 [ "${1:-}" = resume ] && shift          # `tl-run resume <slug>` == `tl-run <slug>` (always resumable)
-slug="${1:?usage: tl-run [resume] <backlog-slug>}"
+slug="${1:-$(tl_pick_slug || true)}"     # no slug at a terminal -> fuzzy-pick from the backlog
+[ -n "$slug" ] || tl_die "usage: tl-run [resume] <backlog-slug>"
 id="tl-$(slugify "$slug")"
 count_q() { "$BIN/tl-spec.sh" qlist "$id" | awk -F'|' -v k="$1" '$3==k{c++} END{print c+0}'; }
 

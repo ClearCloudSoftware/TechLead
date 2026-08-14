@@ -15,9 +15,12 @@ for zero tokens while idle, grill a backlog item into a spec, and deliver a revi
   with the bundled demo workers, which need no agent and spend no tokens.
 - macOS or Linux. (Scripts target bash 3.2, macOS's default; BSD `stat`/`date` are used — see
   the `# tl:` ceilings in the scripts for the GNU swaps.)
-- **Optional:** [`gum`](https://github.com/charmbracelet/gum) (`brew install gum`) or `fzf`. Every
-  prompt — the wizards, the grill walk, gate resolution — upgrades to a real picker when one is on
-  `PATH`, and falls back to a numbered menu when neither is. Nothing requires them.
+- **Optional:** [`gum`](https://github.com/charmbracelet/gum) (`brew install gum`), `fzf`, `glow`,
+  or any `$PAGER`. With gum on `PATH` and a terminal attached you get pickers instead of typed
+  answers, a spinner over the slow steps (test suites, model calls), boxed tables and refusals,
+  level-tagged log lines, and a fuzzy picker when you omit a task id or backlog slug. Without them
+  everything falls back to numbered menus and plain text. **Nothing requires them** — every fallback
+  is exercised by `test/prompt-smoke.sh`.
 - Output is colourised only when stdout is a terminal; `NO_COLOR=1` turns it off. Piped or captured
   output is plain, so scripts and greps see exactly what they saw before. Question, finding, and
   ledger lists (`tl-cost report`, `tl-metric report`/`outcome`) render as a `gum table` when gum is

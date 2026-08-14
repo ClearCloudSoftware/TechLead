@@ -3,8 +3,10 @@
 # kill the session. The report in data/ survives.
 set -eu
 BIN="$(cd "$(dirname "$0")" && pwd)"; . "$BIN/tl-common.sh"; . "$BIN/tl-worktree.sh"; . "$BIN/tl-session.sh"
+. "$BIN/tl-wizard.sh"
 
-id="${1:?usage: tl-teardown ID [--force]}"; force="${2:-}"
+id="${1:-$(tl_pick_task || true)}"; force="${2:-}"
+[ -n "$id" ] || tl_die "usage: tl-teardown ID [--force]"
 project="$(tl_meta_get "$id" project)" || tl_die "no such task: $id"
 wt="$(tl_meta_get "$id" worktree)"
 base="$(tl_meta_get "$id" base)"

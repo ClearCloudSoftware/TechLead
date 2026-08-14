@@ -178,7 +178,7 @@ EOF2
     tl_log "promoted $n question(s) into ${qfile#"$TL_LEAD"/} (provisional, hits:0) — archived ${prop#"$TL_DATA"/}.promoted"
     echo "tl: now re-grill against the seeded bank:  tl-run $slug   (or tl-grill $slug)"
     exit 0 ;;
-  show) cat "$("$BIN/tl-spec.sh" path "${2:?}")"; exit 0 ;;
+  show) tl_page "$("$BIN/tl-spec.sh" path "${2:?}")"; exit 0 ;;
 esac
 
 # ---- default: start/refresh a grill for a backlog slug ----
@@ -197,19 +197,25 @@ tl_log "grill: $id — inference pass over lead/questions.md"
 : "${TL_GRILL_CMD:?tl: no grill driver — set TL_GRILL_CMD (e.g. adapters/claude-grill.sh)}"
 # driver emits one line per question:  qid <TAB> answer_state <TAB> source <TAB> text [<TAB> bank#]
 # The optional 5th field is the number of the lead/questions.md entry this answer was inferred from
-# (§2.6 hits: signal). Old 4-field drivers just omit it → no bump. The loop runs in a pipe subshell,
-# so bank refs are stashed in a temp file to survive to the bump step below.
-brefs="$(mktemp)"
-TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
-TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions" \
-  $TL_GRILL_CMD | while IFS="$TAB" read -r qid st src text bank; do
-    [ -n "$qid" ] || continue
-    case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)
-    case "$src" in owner|inferred) ;; *) src=inferred;; esac
-    "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" "$src" "$(date -u +%Y-%m-%d)" "$text"
-    case "$bank" in ''|*[!0-9]*) ;; *) printf '%s\n' "$bank" >> "$brefs";; esac   # numeric bank ref only
-  done
-rm -f "$bodyf"
+# (§2.6 hits: signal). Old 4-field drivers just omit it → no bump.
+# The driver's output lands in a file rather than a pipe: it is a model call that takes tens of
+# seconds, so it runs under a spinner (tl_spin, which cannot show a pipe), and reading from a file
+# also takes the loop out of the pipe subshell — bank refs no longer need a temp file to escape it.
+drv="$(mktemp)"; brefs="$(mktemp)"
+export TL_GRILL_ID="$id" TL_GRILL_SLUG="$slug" TL_GRILL_TITLE="$title" TL_GRILL_BODY="$bodyf" \
+       TL_QUESTIONS="$TL_LEAD/questions.md" TL_DECISIONS="$TL_LEAD/decisions"
+# Lenient on a non-zero driver, as the pipeline was: whatever it emitted is still parsed, and an
+# empty result fails closed downstream (tl-run refuses to dispatch un-grilled work, #49).
+tl_spin "grill: inference pass over lead/questions.md…" sh -c "$TL_GRILL_CMD > '$drv'" \
+  || tl_log "grill driver exited non-zero — parsing whatever it emitted"
+while IFS="$TAB" read -r qid st src text bank; do
+  [ -n "$qid" ] || continue
+  case "$st"  in decided|leaning|open|spike) ;; *) st=open;;  esac   # validate; unknown -> open (fail closed)
+  case "$src" in owner|inferred) ;; *) src=inferred;; esac
+  "$BIN/tl-spec.sh" qset "$id" "$qid" "$st" "$src" "$(date -u +%Y-%m-%d)" "$text"
+  case "$bank" in ''|*[!0-9]*) ;; *) printf '%s\n' "$bank" >> "$brefs";; esac   # numeric bank ref only
+done < "$drv"
+rm -f "$bodyf" "$drv"
 # hits: bump — a bank question that justified an inferred answer this grill has fired (§2.6, SHAPE.md).
 # Reuse-rate is the risk-1 / D13 signal, so bump each referenced entry once and stamp its date.
 if [ -s "$brefs" ]; then bump_hits "$TL_LEAD/questions.md" $(sort -un "$brefs"); fi

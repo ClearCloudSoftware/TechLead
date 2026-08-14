@@ -44,8 +44,18 @@ TL_WORKTREES="${TL_WORKTREES:-$TL_STATE/wt}"
 mkdir -p "$TL_DATA" "$TL_STATE" "$TL_WORKTREES"
 export TL_HOME TL_DATA TL_STATE TL_LEAD TL_WORKTREES   # so a spawned worker inherits its instance
 
-tl_log() { printf 'tl: %s\n' "$*" >&2; }
-tl_die() { printf 'tl: %s\n' "$1" >&2; exit "${2:-1}"; }
+tl_log() { _tl_say info "$*" >&2; }
+tl_die() { _tl_say error "$1" >&2; exit "${2:-1}"; }
+# Level-tagged when someone is watching, plain `tl: …` otherwise. The gate matters: worker output is
+# captured and read back through tl-peek, and the smoke tests grep these lines.
+_tl_say() {
+  local lvl="$1"; shift
+  if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+    gum log --level "$lvl" --prefix tl "$*"
+  else
+    printf 'tl: %s\n' "$*"
+  fi
+}
 
 # Presentation (single owner: this file). Every tl-* line used to land with identical weight — a
 # refusal read like a progress note. Colour separates "you must act" from "for your information".
@@ -65,7 +75,14 @@ else
 fi
 
 TL_PROG="$(basename "$0" .sh)"; case "$TL_PROG" in tl-*) ;; *) TL_PROG=tl;; esac
-tl_stop() { printf '%s%s: STOP%s — %s\n' "$TL_C_STOP" "$TL_PROG" "$TL_C_0" "$*"; }   # owner must act
+tl_stop() {   # owner must act — the loudest thing the toolbelt prints, so give it a frame
+  if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+    gum style --border normal --border-foreground 1 --foreground 1 --padding "0 1" \
+      "$TL_PROG: STOP — $*"
+  else
+    printf '%s%s: STOP%s — %s\n' "$TL_C_STOP" "$TL_PROG" "$TL_C_0" "$*"
+  fi
+}
 tl_ok()   { printf '%s%s: %s%s\n' "$TL_C_OK" "$TL_PROG" "$*" "$TL_C_0"; }            # it worked
 tl_kv()   { printf '  %s%-7s%s %s\n' "$TL_C_KEY" "$1:" "$TL_C_0" "$2"; }   # cause:/fix:/next: lines
 tl_note() { printf '  %s%s%s\n' "$TL_C_DIM" "$*" "$TL_C_0"; }              # paths, provenance
@@ -100,6 +117,49 @@ tl_table() {
         for(i=1;i<=n;i++) s=s sprintf("%-*s  ", w[i], C[r,i]); sub(/ +$/,"",s); print "  " s }
     }' "$t"
   rm -f "$t"
+}
+
+# tl_spin "title" cmd args…  — a spinner while a slow thing runs (test suite, LLM adapter).
+# The caller MUST keep its own redirections INSIDE the command, e.g.
+#   tl_spin "running tests…" sh -c "cd '$wt' && { $cmd; } >'$out' 2>/dev/null"
+# gum spin swallows the command's output unless --show-output, and --show-output also merges stderr
+# into stdout — which would inject adapter chatter straight into a stream we parse. Keeping the
+# redirection inside the command means gum has nothing to show and nothing to merge.
+# Exit status propagates (tl-gate's `|| trc=$?` depends on it).
+tl_spin() {
+  local title="$1"; shift
+  if [ -n "${TL_DECORATE:-}" ] && command -v gum >/dev/null 2>&1; then
+    gum spin --spinner dot --title "$title" -- "$@"
+  else
+    "$@"
+  fi
+}
+
+# tl_page <file> — show the owner something they are about to decide about.
+# Plain `cat` when not decorating, so captured output is byte-identical. Markdown gets rendered.
+# Paged ONLY when it would not fit: a pager over a six-line report is worse than no pager, and the
+# thing it fixes is real — tl-approve used to cat a long report and then print the prompt below it,
+# pushing the report you are judging off the top of the screen.
+tl_page() { # <file>
+  local f="$1" rows total
+  [ -f "$f" ] || return 0
+  if [ -z "${TL_DECORATE:-}" ]; then cat "$f"; return 0; fi
+  rows="$(tput lines 2>/dev/null || echo 24)"
+  total="$(wc -l < "$f" | tr -d ' ')"
+  if [ "$total" -le "$((rows - 6))" ]; then _tl_render "$f"; return 0; fi
+  LESS="${LESS:-R}" ; export LESS          # else a bare $PAGER=less shows the render's escape codes
+  if [ -n "${PAGER:-}" ]; then _tl_render "$f" | $PAGER
+  elif command -v gum >/dev/null 2>&1; then _tl_render "$f" | gum pager
+  else _tl_render "$f" | less -R 2>/dev/null || _tl_render "$f"
+  fi
+}
+_tl_render() {  # markdown through a renderer when we have one; anything else raw
+  case "$1" in
+    *.md)
+      command -v glow >/dev/null 2>&1 && { glow -s auto "$1" && return 0; }
+      command -v gum  >/dev/null 2>&1 && { gum format < "$1" && return 0; } ;;
+  esac
+  cat "$1"
 }
 
 # bump_hits <lead-file> <ordinal>...  — increment `hits:` and stamp `last:` on the Nth `### ` entry

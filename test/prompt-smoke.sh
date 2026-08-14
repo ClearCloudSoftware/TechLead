@@ -146,6 +146,35 @@ out="$(PATH="$WORK/fakebin:$PATH" tl_choose K "pick" approve approve skip fix 2>
   fail "cancelled tl_choose returned success — the gate would read '' as approve"
 [ -z "$out" ] || fail "cancelled tl_choose emitted '$out'"
 
+echo "== tl_spin runs the command, keeps its redirection, and propagates its exit status =="
+# gum spin swallows stdout unless --show-output, so every caller keeps its own redirection INSIDE
+# the command. If that contract breaks, tl-gate parses an empty failing-test list as "clean".
+spin_out="$WORK/spin.out"
+tl_spin "t" sh -c "printf 'a\nb\n' > '$spin_out'; exit 3" && fail "tl_spin swallowed exit status 3"
+tl_spin "t" sh -c "exit 7" || rc=$?
+[ "${rc:-0}" = 7 ] || fail "tl_spin did not propagate exit 7 (got ${rc:-0}) — tl-gate's trc breaks"
+[ "$(tr '\n' ',' < "$spin_out")" = "a,b," ] || fail "tl_spin lost the command's redirected output"
+TL_DECORATE=1 PATH="$WORK/fakebin:$PATH" tl_spin "t" true 2>/dev/null || true   # gum path, no crash
+
+echo "== tl_page is a plain cat when nothing is watching =="
+printf '# Title\n\nbody line\n' > "$WORK/p.md"
+[ "$(tl_page "$WORK/p.md")" = "$(cat "$WORK/p.md")" ] || fail "tl_page altered captured output"
+[ -z "$(tl_page "$WORK/nope.md")" ] || fail "tl_page on a missing file should be silent"
+
+echo "== tl_log stays plain when captured, so tl-peek and the greps still work =="
+[ "$(tl_log hello 2>&1)" = "tl: hello" ] || fail "tl_log changed shape: $(tl_log hello 2>&1)"
+
+echo "== tl_confirm: gum when interactive, exit status IS the answer =="
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "$GUM_ARGS"\nexit 0\n' > "$WORK/fakebin/gum"
+PATH="$WORK/fakebin:$PATH" tl_confirm K "do it" y || fail "tl_confirm said no when gum said yes"
+case "$(cat "$GUM_ARGS")" in confirm*--default*) ;; *) fail "tl_confirm did not use gum confirm: $(cat "$GUM_ARGS")";; esac
+printf '#!/bin/sh\nexit 1\n' > "$WORK/fakebin/gum"
+PATH="$WORK/fakebin:$PATH" tl_confirm K "do it" y && fail "tl_confirm said yes when gum said no"
+
+echo "== pickers refuse rather than guess when there is nobody to ask =="
+TL_YES=1 tl_pick_task && fail "tl_pick_task invented a task id non-interactively"
+TL_YES=1 tl_pick_slug && fail "tl_pick_slug invented a slug non-interactively"
+
 echo "== an exec that probes /dev/tty must not silence stderr for the rest of the script =="
 # `exec 3</dev/tty 2>/dev/null` applies BOTH redirections to the shell permanently — the gate's
 # "blocked: N finding(s) unresolved" refusal then vanished for exactly the owner who was sitting at

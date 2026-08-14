@@ -26,4 +26,4 @@ wait "$std_pid"  2>/dev/null || true
 } > "$draft"
 
 echo "tl: review draft -> $draft  (draft only — nothing posted)"
-cat "$draft"
+tl_page "$draft"

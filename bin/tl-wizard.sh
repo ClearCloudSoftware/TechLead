@@ -20,7 +20,16 @@ tl_ask() {  # KEY "prompt" "default" -> answer on stdout
 }
 
 tl_confirm() {  # KEY "prompt" "y|n default" -> exit 0 for yes
-  local a; a="$(tl_ask "$1" "$2 (y/n)" "$3")"
+  local key="$1" prompt="$2" def="$3" ov
+  eval "ov=\${TL_ANSWER_${key}:-}"
+  if [ -z "$ov" ] && ! tl_noninteractive && command -v gum >/dev/null 2>&1; then
+    # gum confirm's own exit status IS the answer (0 yes / 1 no), so pass it straight through.
+    # A cancel lands on "no", which is the conservative reading of every prompt that uses this.
+    case "$def" in y|Y|yes|YES|true|1) gum confirm --default   "$prompt";;
+                   *)                  gum confirm --default=false "$prompt";; esac
+    return $?
+  fi
+  local a; a="$(tl_ask "$key" "$prompt (y/n)" "$def")"
   case "$a" in y|Y|yes|YES|true|1) return 0;; *) return 1;; esac
 }
 
@@ -44,6 +53,48 @@ tl_choose() {  # KEY "prompt" default opt1 opt2 ... -> chosen on stdout (gum/fzf
   case "$pick" in *[!0-9]*) printf '%s\n' "$pick"; return 0;; esac   # typed a literal value
   i=1; for o in "$@"; do [ "$i" = "$pick" ] && { printf '%s\n' "$o"; return 0; }; i=$((i+1)); done
   printf '%s\n' "$def"                               # out of range -> default
+}
+
+tl_filter() {  # "placeholder" -> one line, fuzzy-picked from the lines on stdin (empty if cancelled)
+  local prompt="$1"
+  if command -v gum >/dev/null 2>&1; then gum filter --placeholder "$prompt"; return $?; fi
+  if command -v fzf >/dev/null 2>&1; then fzf --prompt="$prompt> "; return $?; fi
+  local all pick                                     # plain fallback: list, then type it
+  all="$(cat)"; printf '%s\n' "$all" | sed 's/^/  /' >&2
+  printf 'tl: %s: ' "$prompt" >&2; IFS= read -r pick || pick=""
+  printf '%s\n' "$pick"
+}
+
+tl_pick_task() {  # -> a task id from state/*.meta. Non-zero if there is nobody to ask, or nothing to pick.
+  tl_noninteractive && return 1
+  local ids
+  ids="$(ls "$TL_STATE"/*.meta 2>/dev/null | sed 's#.*/##; s#\.meta$##')" || true
+  [ -n "$ids" ] || return 1
+  printf '%s\n' "$ids" | tl_filter "task id"
+}
+
+tl_pick_slug() {  # -> a backlog slug (the heading key, not the title)
+  tl_noninteractive && return 1
+  local b items
+  b="${TL_BACKLOG:-$TL_DATA/backlog.md}"
+  [ -f "$b" ] || return 1
+  # "## slug: title" -> "slug — title"; slugs never contain spaces, so the first field is the answer.
+  items="$(awk '/^## /{ s=$0; sub(/^## /,"",s); k=s; sub(/:.*/,"",k); t=s; sub(/^[^:]*: */,"",t);
+                        printf "%s — %s\n", k, t }' "$b")"
+  [ -n "$items" ] || return 1
+  printf '%s\n' "$items" | tl_filter "backlog item" | awk '{print $1}'
+}
+
+tl_ask_dir() {  # KEY "prompt" "default" -> a directory path (gum file --directory when present)
+  local key="$1" prompt="$2" def="$3" ov d
+  eval "ov=\${TL_ANSWER_${key}:-}"
+  [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
+  tl_noninteractive && { printf '%s\n' "$def"; return 0; }
+  if command -v gum >/dev/null 2>&1; then
+    d="$(gum file --directory --header="$prompt" "${def:-$PWD}")" || return $?
+    printf '%s\n' "${d:-$def}"; return 0
+  fi
+  tl_ask "$key" "$prompt" "$def"
 }
 
 tl_text() {  # KEY "prompt" "default" -> free text on stdout (gum input if present, else one line)

@@ -18,8 +18,17 @@ case "$cmd" in
       tl_die "slug must be lowercase letters, digits, hyphens — e.g. add-search (got: $slug)"
     fi
     title="${1:?usage: tl-backlog add <slug> \"<title>\" [description...]}"; shift || true
+    # the title is one markdown heading line — a newline (e.g. a mis-pasted multi-line arg) would split
+    # the heading and orphan its tail. Reject it loudly rather than write a broken item.
+    [ "$(printf '%s' "$title" | wc -l | tr -d ' ')" -eq 0 ] \
+      || tl_die "title must be a single line (it contains a newline) — quote the whole title on one line"
     desc="$*"
-    [ -f "$BACKLOG" ] || { mkdir -p "$(dirname "$BACKLOG")"; printf '# Backlog\n' > "$BACKLOG"; }
+    if [ ! -f "$BACKLOG" ]; then
+      mkdir -p "$(dirname "$BACKLOG")"; printf '# Backlog\n' > "$BACKLOG"
+    elif ! grep -q '^# ' "$BACKLOG"; then
+      # existing but header-less (created by hand or an earlier flow) — restore the H1 so it's well-formed
+      { printf '# Backlog\n\n'; cat "$BACKLOG"; } > "$BACKLOG.tmp" && mv "$BACKLOG.tmp" "$BACKLOG"
+    fi
     # refuse a duplicate slug — tl-grill matches the FIRST heading, so a second would be unreachable
     if awk -v s="$slug" 'index($0,"## "s":")==1{f=1} END{exit !f}' "$BACKLOG"; then
       tl_die "backlog already has an item '$slug' — pick another slug or edit $BACKLOG"

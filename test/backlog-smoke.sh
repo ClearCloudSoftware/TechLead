@@ -42,4 +42,18 @@ done
 [ "$("$BIN/tl-backlog.sh" list | grep -c .)" -eq 2 ] || fail "B5: a bad slug still got written"
 echo "  B5 ok — malformed slugs refused, nothing written"
 
+echo "== B6: rejects a title containing a newline (would split the heading) =="
+if "$BIN/tl-backlog.sh" add multi "$(printf 'line one\nline two')" >/tmp/bl-b6.log 2>&1; then fail "B6: accepted a multi-line title"; fi
+grep -q 'single line' /tmp/bl-b6.log || fail "B6: wrong error for a multi-line title: $(cat /tmp/bl-b6.log)"
+grep -q '^## multi:' "$TL_BACKLOG" && fail "B6: a broken heading was written" || true
+echo "  B6 ok — multi-line title refused, nothing written"
+
+echo "== B7: adding to a header-less backlog restores the # Backlog H1 =="
+HL="$WORK/headerless.md"; printf '## existing: an item with no H1 header\nbody line\n' > "$HL"
+TL_BACKLOG="$HL" "$BIN/tl-backlog.sh" add fresh "A fresh item" >/dev/null 2>&1 || fail "B7: add errored"
+head -1 "$HL" | grep -q '^# Backlog' || fail "B7: did not restore the # Backlog header"
+grep -qx '## existing: an item with no H1 header' "$HL" || fail "B7: clobbered the pre-existing item"
+grep -qx '## fresh: A fresh item' "$HL" || fail "B7: did not append the new item"
+echo "  B7 ok — header restored, existing + new items intact"
+
 echo "PASS: tl-backlog add appends grill-matchable items with a slug guard + no duplicates; list works"

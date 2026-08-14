@@ -56,7 +56,8 @@ Read state to know the next step — don't hardcode an order:
    happy, they (or you, mechanically) `git add test.sh && commit` then `tl-baseline <name>` (promotes
    to ready). You never baseline an unreviewed harness. (Existing repos with a known stack:
    `tl-onboard` already detected `test_command` — skip this.)
-2. Add each feature to `.techlead/data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
+2. Add each feature: `tl-backlog add <slug> "<title>" "<what/where>"` (validates the slug; or edit
+   `.techlead/data/backlog.md` directly — `## <slug>: <title>` + a sentence). `tl-backlog list` shows them.
 3. `tl-run <slug>` — grills, then spawns.  → **open questions? HARD-STOP (rule 1).**
    - **Empty bank on a fresh project?** `tl-run` STOPs and drafts candidate questions to
      `data/proposals/question-<slug>.md`. Show the owner the file — **HARD-STOP (rule 3)**; they prune

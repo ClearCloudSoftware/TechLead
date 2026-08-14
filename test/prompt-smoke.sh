@@ -26,8 +26,9 @@ echo "== TL_ANSWER_<KEY> overrides, interactive or not =="
 [ "$(TL_ANSWER_K=typed tl_text K "prompt" "the default")" = typed ] || fail "tl_text override"
 [ "$(TL_ANSWER_K='a;c' tl_pick_many K "prompt" a b c | tr '\n' ',')" = "a,c," ] || fail "tl_pick_many override"
 
-echo "== forced-interactive: answers are parsed =="
+echo "== forced-interactive, no picker installed: answers are parsed =="
 tl_noninteractive() { return 1; }        # stub: pretend stdin is a terminal
+REAL_PATH="$PATH"; PATH=/usr/bin:/bin    # and pretend gum/fzf are absent — this is the fallback path
 
 [ "$(echo hello | tl_text K "prompt" "the default" 2>/dev/null)" = hello ] || fail "tl_text reads the typed line"
 [ "$(echo '' | tl_text K "prompt" "the default" 2>/dev/null)" = "the default" ] || fail "tl_text empty keeps the default"
@@ -82,6 +83,36 @@ export TL_LEAD="$WORK/lead"; mkdir -p "$TL_LEAD"
 "$BIN/tl-grill.sh" promote rotate-creds >/dev/null 2>&1
 n="$(grep -c '^### ' "$TL_LEAD/questions.md")"
 [ "$n" -eq 2 ] || fail "expected 2 questions promoted into lead/, got $n"
+
+PATH="$REAL_PATH"
+
+echo "== when gum is installed: the right subcommand, and a cancel that propagates =="
+# Two defects this pins down, both found by hand at a real terminal:
+#  1. `gum write` is the multi-line textarea — it submits on ctrl-d, so pressing enter looks hung.
+#     Prompts must use `gum input`, which submits on enter like every other prompt here.
+#  2. A cancelled picker used to fall through to the plain prompt (two prompts for one answer) or
+#     return "" (which the gate reads as "approve"). Cancel must propagate.
+mkdir -p "$WORK/fakebin"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >&2\necho picked\n' > "$WORK/fakebin/gum"
+chmod +x "$WORK/fakebin/gum"
+args="$(PATH="$WORK/fakebin:$PATH" tl_text K "the question" "the default" 2>&1 >/dev/null)"
+[ "$(PATH="$WORK/fakebin:$PATH" tl_text K "the question" "the default" 2>/dev/null)" = picked ] \
+  || fail "tl_text ignored gum"
+case "$args" in
+  input*) ;;
+  write*) fail "tl_text uses 'gum write' — it submits on ctrl-d and reads as a hung prompt" ;;
+  *) fail "unexpected gum invocation: $args" ;;
+esac
+case "$args" in *--value=*) ;; *) fail "tl_text dropped --value (no editable default): $args";; esac
+case "$args" in *--header=*) ;; *) fail "tl_text dropped --header (question invisible): $args";; esac
+
+printf '#!/bin/sh\nexit 130\n' > "$WORK/fakebin/gum"      # now stand in for esc / ctrl-c
+out="$(PATH="$WORK/fakebin:$PATH" tl_text K "the question" "the default" 2>/dev/null)" && \
+  fail "cancelled tl_text returned success"
+[ -z "$out" ] || fail "cancelled tl_text emitted '$out' instead of propagating the cancel"
+out="$(PATH="$WORK/fakebin:$PATH" tl_choose K "pick" approve approve skip fix 2>/dev/null)" && \
+  fail "cancelled tl_choose returned success — the gate would read '' as approve"
+[ -z "$out" ] || fail "cancelled tl_choose emitted '$out'"
 
 echo "== an exec that probes /dev/tty must not silence stderr for the rest of the script =="
 # `exec 3</dev/tty 2>/dev/null` applies BOTH redirections to the shell permanently — the gate's

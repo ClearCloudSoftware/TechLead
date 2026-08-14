@@ -29,8 +29,13 @@ tl_choose() {  # KEY "prompt" default opt1 opt2 ... -> chosen on stdout (gum/fzf
   local ov; eval "ov=\${TL_ANSWER_${key}:-}"
   [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
   tl_noninteractive && { printf '%s\n' "$def"; return 0; }
-  if command -v gum >/dev/null 2>&1; then gum choose --selected="$def" "$@"; return 0; fi
-  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --select-1 --prompt="$prompt> "; return 0; fi
+  # --header carries the question: gum paints over the scrollback, so anything the caller echoed
+  # first can be gone by the time the picker is on screen.
+  # Cancel (esc / ctrl-c) returns non-zero and we propagate it — the caller's `set -e` aborts.
+  # Swallowing it would hand back an empty string, which reads as "took the default": a cancelled
+  # gate prompt would silently approve a finding.
+  if command -v gum >/dev/null 2>&1; then gum choose --header="$prompt" --selected="$def" "$@"; return $?; fi
+  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --select-1 --prompt="$prompt> "; return $?; fi
   local i=1 o pick                                   # plain fallback: numbered menu, empty -> default
   for o in "$@"; do printf '  %d) %s\n' "$i" "$o" >&2; i=$((i+1)); done
   printf 'tl: %s [%s]: ' "$prompt" "$def" >&2
@@ -41,20 +46,24 @@ tl_choose() {  # KEY "prompt" default opt1 opt2 ... -> chosen on stdout (gum/fzf
   printf '%s\n' "$def"                               # out of range -> default
 }
 
-tl_text() {  # KEY "prompt" "default" -> free text on stdout (gum write if present, else one line)
-  # The point is to answer WITHOUT an editor: gum gives a real multi-line box, the fallback gives a
-  # single readline-backed line. `read -e -i` (pre-filled editable default) would be nicer but needs
-  # bash 4+; macOS ships 3.2, so the default is shown in the prompt and empty input keeps it.
+tl_text() {  # KEY "prompt" "default" -> free text on stdout (gum input if present, else one line)
+  # `gum input`, NOT `gum write`: write is the multi-line textarea and submits on ctrl-d, which
+  # reads as a hung prompt to anyone who just pressed enter. input submits on enter like every other
+  # prompt here, and --value pre-fills an EDITABLE default — the `read -e -i` behaviour bash 3.2
+  # can't give us. Without gum the default is shown instead, and empty input keeps it.
   local key="$1" prompt="$2" def="$3" ov ans
   eval "ov=\${TL_ANSWER_${key}:-}"
   [ -n "$ov" ] && { printf '%s\n' "$ov"; return 0; }
   tl_noninteractive && { printf '%s\n' "$def"; return 0; }
-  if command -v gum >/dev/null 2>&1 &&
-     ans="$(gum write --width 78 --placeholder "$prompt" --value "$def" 2>/dev/null)"; then
-    printf '%s\n' "${ans:-$def}"; return 0                # gum absent/cancelled/older -> plain prompt
+  if command -v gum >/dev/null 2>&1; then
+    # Cancel propagates (see tl_choose) rather than quietly demoting to the plain prompt below —
+    # falling through mid-question is how you end up staring at two different prompts for one answer.
+    ans="$(gum input --header="$prompt" --value="$def" --char-limit=0)" || return $?
+    printf '%s\n' "${ans:-$def}"; return 0
   fi
   printf 'tl: %s\n' "$prompt" >&2
-  printf '    %s[enter keeps: %s]%s\n> ' "$TL_C_DIM" "$def" "$TL_C_0" >&2
+  [ -n "$def" ] && printf '    %s[enter keeps: %s]%s\n' "$TL_C_DIM" "$def" "$TL_C_0" >&2
+  printf '> ' >&2
   IFS= read -r ans || ans=""
   printf '%s\n' "${ans:-$def}"
 }
@@ -66,8 +75,8 @@ tl_pick_many() {  # KEY "prompt" opt1 opt2 ... -> the KEPT options, one per line
   local ov; eval "ov=\${TL_ANSWER_${key}:-}"
   [ -n "$ov" ] && { printf '%s\n' "$ov" | tr ';' '\n'; return 0; }
   tl_noninteractive && { printf '%s\n' "$@"; return 0; }
-  if command -v gum >/dev/null 2>&1; then gum choose --no-limit --header="$prompt" "$@"; return 0; fi
-  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --multi --prompt="$prompt> "; return 0; fi
+  if command -v gum >/dev/null 2>&1; then gum choose --no-limit --header="$prompt" "$@"; return $?; fi
+  if command -v fzf >/dev/null 2>&1; then printf '%s\n' "$@" | fzf --multi --prompt="$prompt> "; return $?; fi
   local i=1 o n pick                                 # plain fallback: numbered list, keep-by-number
   for o in "$@"; do printf '  %s%d)%s %s\n' "$TL_C_KEY" "$i" "$TL_C_0" "$o" >&2; i=$((i+1)); done
   printf 'tl: %s — numbers to KEEP, space-separated [all]: ' "$prompt" >&2

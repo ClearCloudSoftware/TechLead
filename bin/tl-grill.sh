@@ -70,12 +70,16 @@ _answer_loop() {
   while IFS='|' read -r qid cur_st cur_src cur_at cur_text <&4; do
     [ -n "$qid" ] || continue
     n=$((n+1))
-    printf '\n%s[%s]%s %s\n' "$TL_C_KEY" "$qid" "$TL_C_0" "$cur_text" >&2
+    # The question travels IN the prompt, not as a line echoed before it: a picker repaints the
+    # screen, so anything printed first is gone by the time you are looking at the choices.
     # TL_YES is the WIZARDS' "take every default" switch. Letting it reach here would stamp every
     # open question `decided` with the inferred text — the exact rubber stamp the guard above refuses.
     # Blank it for the prompts; TL_ANSWER_<KEY> is the deliberate per-question override.
-    st="$(TL_YES= tl_choose "GRILL_${qid}_STATE" "state" decided decided leaning spike open)"
-    text="$(TL_YES= tl_text "GRILL_${qid}_TEXT" "your answer" "$cur_text")"
+    st="$(TL_YES= tl_choose "GRILL_${qid}_STATE" "[$qid] $cur_text" decided decided leaning spike open)"
+    # Empty default on purpose: for an OPEN question the stored text is the QUESTION, not a draft
+    # answer, so pre-filling it would make you erase the question before every answer. Submitting
+    # empty falls through to _answer, which keeps whatever the question already says.
+    text="$(TL_YES= tl_text "GRILL_${qid}_TEXT" "[$qid] $cur_text — your answer" "")"
     _answer "$id" "$qid" "$st" "$text"
   done 4< "$openf"
   rm -f "$openf"

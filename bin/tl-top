@@ -498,6 +498,32 @@ def _selftest():
     check(len(mrows) == len(q.quiet) + len([r for r in q.rows if r.fleet]),
           "':fleet' shows every live task, loud ones first")
 
+    # ---- the inbox table's own layout: DETAIL wraps under its column, rows are variable height ----
+    long_q = ("What happens to the old index while the new one builds, and who owns the rollback "
+              "if the migration has to be abandoned halfway through a busy weekday afternoon?")
+    layout = [QRow("question", "tl-open", "open", "q3", "q3  " + long_q),
+              QRow("backlog", "fresh", "fresh", "", "never grilled")]
+    W = 80
+    lines = inbox_lines(layout, W)
+    check(all(len(t) <= W for _i, t in lines),
+          "no inbox line may exceed the window: %r" % [len(t) for _i, t in lines])
+    q3 = [t for i, t in lines if i == 0]
+    check(len(q3) > 1, "a long detail must occupy several lines, not be clipped: %r" % q3)
+    check(q3[0].startswith("● question tl-open"), "the first line carries the row's columns")
+    check(all(t[:_HEAD_W].strip() == "" for t in q3[1:]),
+          "continuation lines must be blank in the WHAT/TASK columns: %r" % q3[1:])
+    rebuilt = " ".join(" ".join(t[_HEAD_W:] for t in q3).split())
+    check(rebuilt == " ".join(layout[0].detail.split()),
+          "the table must show the detail in FULL — nothing lost to the window edge:\n  want %r\n  got  %r"
+          % (layout[0].detail, rebuilt))
+    short = [t for i, t in lines if i == 1]
+    check(len(short) == 1 and short[0].startswith("○ backlog")
+          and short[0][:_HEAD_W].rstrip().endswith("fresh")
+          and short[0][_HEAD_W:] == "never grilled",
+          "a short detail still takes exactly one line, in its columns: %r" % short)
+    check(len(inbox_lines(layout, 400)[0][1]) < 400 and len(inbox_lines(layout, 400)) == 2,
+          "a wide window needs no wrapping at all")
+
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
     if fail:
@@ -507,6 +533,7 @@ def _selftest():
     print("PASS: tl-top fleet model (priority order, exclusion, waiting-on)")
     print("PASS: tl-top queue model (backlog+spec+fleet join, rank order, cursor keys)")
     print("PASS: tl-top modal tables (backlog/q/bank/findings/fleet, keys resolve to queue rows)")
+    print("PASS: tl-top inbox layout (DETAIL wraps under its column, rows vary in height)")
 
 
 # ----------------------------------------------------------------- instance + shell-outs
@@ -717,12 +744,31 @@ def _tabs(view):
 
 
 # ------------------------------------------------------------------------ view 1: inbox
+_HEAD_W = 29        # "● question tl-add-search     " — where the DETAIL column starts
+
+
+def inbox_lines(rows, w):
+    """[(row_index, text)] — one entry per SCREEN line, with DETAIL wrapped under its own column.
+
+    A row is as tall as its text needs. The detail is a question or a worker's ask, written by a
+    person, and the point of the list is to read it — so it wraps here rather than being clipped at
+    the window edge with the full text only available one keypress away. Pure, so the layout is
+    assertable without a terminal."""
+    out = []
+    for i, r in enumerate(rows):
+        mark = "○" if r.what == "backlog" else "●"
+        head = "%s %-8s %-17s " % (mark, r.what[:8], (r.task or r.slug)[:17])
+        for j, ln in enumerate(_wrap(r.detail, max(8, w - _HEAD_W - 1))):
+            out.append((i, (head if j == 0 else " " * _HEAD_W) + ln))
+    return out
+
+
 def _draw_inbox(win, st, q, data_dir):
     h, w = win.getmaxyx()
     rows = _filtered(q.rows, st["filter"])
     _bar(win, 0, " " + _tabs(1),
          "%d waiting · %d working " % (len(q.rows), len(q.quiet)))
-    _addln(win, 1, 0, "%-10s %-17s %s" % ("WHAT", "TASK", "DETAIL"), curses.A_UNDERLINE)
+    _addln(win, 1, 0, "%-11s%-18s%s" % ("WHAT", "TASK", "DETAIL"), curses.A_UNDERLINE)
     if not rows:
         _addln(win, 3, 0, "  nothing is waiting on you." if not st["filter"]
                else "  nothing matches /%s" % st["filter"])
@@ -730,18 +776,23 @@ def _draw_inbox(win, st, q, data_dir):
         return
 
     sel = _index_of(rows, st["cursor"])
-    body_h = max(3, (h - 5) // 2)
-    top = max(0, sel - body_h + 1) if sel >= body_h else 0
-    for i in range(top, min(len(rows), top + body_h)):
-        r = rows[i]
-        mark = "○" if r.what == "backlog" else "●"
-        line = "%s %-8s %-17s %s" % (mark, r.what[:8], (r.task or r.slug)[:17], r.detail)
-        attr = _bucket_attr(_WHAT_ATTR.get(r.what, "quiet"))
-        if i == sel:
-            attr = curses.A_REVERSE
-        _addln(win, 2 + (i - top), 0, line.ljust(w), attr)
+    lines = inbox_lines(rows, w)
+    body_h = max(3, (h - 5) * 2 // 3)      # wrapped rows are taller, so the list gets the bigger half
 
-    y = 2 + min(len(rows) - top, body_h) + 1
+    # Rows are variable height now, so scroll by LINE while keeping the whole selected row on
+    # screen — anchoring on its last line, then pulling back if that hid its first.
+    span = [k for k, (i, _) in enumerate(lines) if i == sel] or [0]
+    top = max(0, span[-1] - body_h + 1)
+    top = min(top, span[0])
+
+    drawn = 0
+    for k in range(top, min(len(lines), top + body_h)):
+        i, text = lines[k]
+        attr = curses.A_REVERSE if i == sel else _bucket_attr(_WHAT_ATTR.get(rows[i].what, "quiet"))
+        _addln(win, 2 + drawn, 0, text.ljust(w), attr)
+        drawn += 1
+
+    y = 2 + drawn + 1
     y = _draw_detail(win, rows[sel], y, h - 2, data_dir)
     if q.quiet and y < h - 2:
         names = " · ".join("%s %s" % (r.id, r.state) for r in q.quiet[:4])

@@ -126,6 +126,27 @@ elif SCENARIO == "answer":
     want(screen, "answer q3", "d must act immediately after an answer — the notice must not eat it")
     send("\x1b")                              # esc: leave q3 open, writing nothing
 
+elif SCENARIO == "report":
+    # "plan report ready: approve, skip or fix" has to be actionable FROM HERE — the row was
+    # telling you to do something the TUI gave you no way to do.
+    screen = send("/docs\n")
+    want(screen, "tl-docs", "filter to the finished plan")
+    want(screen, "public re-export", "the report itself must show in the pane, not the session log")
+    screen = send("2")
+    want(screen, "report", "view 2 must label the report")
+    want(screen, "rename the widget module", "view 2 must show the report")
+    send("1")
+    screen = send("p", 2.5)
+    want(screen, "update the three importers", "p must page the REPORT")
+    screen = send("g")
+    want(screen, "approve / skip / fix", "g on a plan must offer the plan gate, not the change one")
+    # assert on the OUTCOME rather than the confirm text: the prompt overlaps the footer it
+    # replaces, so curses re-emits only fragments of it. The shell checks meta for `approval`.
+    send("y", 2.5)                            # confirm -> tl-approve runs full-screen
+    send("\n", 2.0)                           # its "approve / skip / fix ?" -> default approve
+    screen = send("\n", 2.0)                  # dismiss [enter to return]
+    want(screen, "recorded your decision", "the outcome must be reported back in the TUI")
+
 elif SCENARIO == "grill-ok":
     screen = send("/backlog\n")
     want(screen, "csv-export", "filter down to the un-grilled items")

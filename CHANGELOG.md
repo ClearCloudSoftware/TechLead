@@ -52,6 +52,10 @@ use (§4).
   - A dispatched task recedes out of the priority list, so its row now says **how long it has been
     going and when its session last wrote** (`:fleet` carries the elapsed time too). Without that,
     a worker with nothing to show for ten minutes looks exactly like a wedged one.
+  - A finished `plan` **is** its report, so the report shows in the inbox pane and the briefing,
+    `p` pages it in full, and `g` runs `tl-approve` for a plan (`tl-deliver` for a change, mirroring
+    `tl-run`'s own kind test). The row said "approve, skip or fix" while offering no way to read the
+    thing or record the decision.
   - `/` starts a **fresh** filter instead of being seeded with the current one, so `/` then enter
     clears it and a new term replaces rather than concatenates.
 - **`tl-backlog show <slug>`** — the read side of one item (line number, title, body), so a reader

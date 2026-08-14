@@ -49,6 +49,7 @@ class Row:
     # these — and once dispatched, a task recedes into the quiet line, so this is all you get.
     started: float = 0.0
     active: float = 0.0
+    report: str = ""    # the deliverable itself — what "approve, skip or fix" is ABOUT
 
 
 # Visual/sort priority: lower = louder. Unresolved gate findings are the single most important
@@ -120,6 +121,16 @@ def _liveness(r):
     return "last output %s ago" % age(time.time() - r.active)
 
 
+def read_report(path, limit=200):
+    """The worker's deliverable, as lines. A `plan` task IS its report — the row that says
+    "approve, skip or fix" is asking about this text, so the TUI has to be able to show it."""
+    try:
+        with open(path) as f:
+            return [ln.rstrip("\n") for ln in f.readlines()[:limit]]
+    except OSError:
+        return []
+
+
 def _mtime(path):
     try:
         return os.path.getmtime(path)
@@ -165,6 +176,7 @@ def build_fleet_model(state_dir, data_dir, state_of):
             base=meta.get("base", ""),
             started=_mtime(path),
             active=_mtime(os.path.join(state_dir, "sessions", tid, "log")),
+            report=meta.get("report", ""),
         ))
     rows.sort(key=lambda r: (r.rank, r.id))
     return rows
@@ -901,6 +913,8 @@ def _foot_inbox(win, st, q, row=None):
         keys = " d/l/s answer   e edit   x reject   r run   / filter"
     elif row is not None and row.what == "gate":
         keys = " g gate   p peek   e edit   r run   / filter"
+    elif row is not None and row.what == "review":
+        keys = " p read the report   g approve/deliver   e edit   r run   / filter"
     else:
         keys = " r run   g gate   p peek   e edit   / filter"
     _bar(win, h - 1, keys, "? help   q quit ")
@@ -954,10 +968,18 @@ def _draw_detail(win, r, y, ymax, data_dir):
         for ln in fleet_lines(r.fleet, os.path.dirname(os.path.dirname(data_dir))):
             if y < ymax:
                 _addln(win, y, 0, ln, _bucket_attr("quiet")); y += 1
-        remaining = ymax - y
-        if remaining > 0 and r.fleet:
-            for ln in tl_peek(r.task, remaining).splitlines()[-remaining:]:
-                _addln(win, y, 2, ln); y += 1     # worker output is preformatted — never rewrap it
+        report = read_report(r.fleet.report) if r.fleet and r.fleet.report else []
+        if report:
+            # The deliverable beats the session tail: a row that says "approve, skip or fix" is
+            # asking about THIS, and the log is only how it got here.
+            y = _rule(win, y, "report — p pages it in full")
+            for ln in report[: max(0, ymax - y)]:
+                _addln(win, y, 2, ln); y += 1     # markdown, preformatted — never rewrap it
+        else:
+            remaining = ymax - y
+            if remaining > 0 and r.fleet:
+                for ln in tl_peek(r.task, remaining).splitlines()[-remaining:]:
+                    _addln(win, y, 2, ln); y += 1
     return y
 
 
@@ -1005,6 +1027,13 @@ def _draw_briefing(win, st, q, data_dir):
                       label="%s [%s] " % ("!" if open_ else "x", f.get("rule", "?")))
         y += 1
 
+    report = read_report(r.fleet.report) if r.fleet and r.fleet.report else []
+    if report and y < ymax - 1:
+        _addln(win, y, 2, "Report — p pages it in full:", _bucket_attr("quiet")); y += 1
+        for ln in report[: max(0, ymax - y - 1)]:
+            _addln(win, y, 5, ln); y += 1
+        y += 1
+
     done = [x for x in (r.spec.questions if r.spec else []) if x.state != "open"]
     if done and y < ymax - 1:
         _addln(win, y, 2, "Already decided on this item:", _bucket_attr("quiet")); y += 1
@@ -1040,6 +1069,9 @@ def _draw_briefing(win, st, q, data_dir):
              "n next   q quit ")
     elif r.what == "backlog":
         _bar(win, h - 1, " g grill   r run (grill+dispatch)   e edit   x drop", "n next   q quit ")
+    elif r.what == "review":
+        _bar(win, h - 1, " p read the report   g approve/deliver   e edit   r run",
+             "n next   q quit ")
     else:
         _bar(win, h - 1, " r run   g gate   p peek   e edit   x reject", "n next   q quit ")
 
@@ -1294,6 +1326,21 @@ def _ran(argv, rc, ok):
     return ok if rc == 0 else "%s exited %d — nothing changed (its error was on the shell)" % (name, rc)
 
 
+def _page_file(win, path):
+    """$PAGER over a file — how you actually READ a plan report rather than glimpsing its head."""
+    def go():
+        try:
+            subprocess.call(shlex.split(os.environ.get("PAGER") or "less") + [path])
+        except OSError:
+            with open(path) as f:
+                sys.stdout.write(f.read())
+            try:
+                input("\n[enter to return] ")
+            except EOFError:
+                pass
+    _suspend(win, go)
+
+
 def _peek_fullscreen(win, tid):
     if not _ID_RE.match(tid):
         return
@@ -1406,7 +1453,7 @@ def _help(win):
         "  r                 run / resume the pipeline         → tl-run   (confirm)",
         "  g                 grill an un-grilled backlog item  → tl-grill  (confirm)",
         "                    …or resolve the delivery gate     → tl-deliver (confirm)",
-        "  p                 peek the worker's output          → $PAGER",
+        "  p                 read the report, or peek output  → $PAGER",
         "  / :               filter · command (view 3)",
         "  ? q               this help · quit",
         "",
@@ -1623,7 +1670,11 @@ def _loop(win):
             _edit_file(win, path, line)
             q = recompute()
         elif ch == ord("p") and target and target.task.startswith("tl-"):
-            _peek_fullscreen(win, target.task)
+            row = next((r for r in q.rows if r.task == target.task and r.fleet), None)
+            if row and row.fleet.report and os.path.isfile(row.fleet.report):
+                _page_file(win, row.fleet.report)      # the deliverable beats the session tail
+            else:
+                _peek_fullscreen(win, target.task)
         elif ch == ord("r") and target:
             slug = target.slug or (target.task[3:] if target.task.startswith("tl-") else target.task)
             if _confirm(win, "Run pipeline: tl-run %s  (its own approve/reject prompts)" % slug):
@@ -1640,9 +1691,21 @@ def _loop(win):
                     argv = [os.path.join(BIN, "tl-grill.sh"), target.slug]
                     st["notice"] = _ran(argv, _shell_out(win, argv),
                                         "grilled '%s' — its questions are in the list" % target.slug)
-            elif _confirm(win, "Resolve gate: tl-deliver %s  (approve/skip/fix per finding)" % target.task):
-                argv = [os.path.join(BIN, "tl-deliver.sh"), target.task]
-                st["notice"] = _ran(argv, _shell_out(win, argv), "delivered %s" % target.task)
+            else:
+                # a `plan` has no gate — its terminal step is the owner approving the report, which
+                # is tl-approve. Mirrors tl-run's own kind test, so the TUI and the CLI agree.
+                row = next((r for r in q.rows if r.task == target.task and r.fleet), None)
+                kind = row.fleet.kind if row else "change"
+                if kind == "change":
+                    prompt, argv, ok = ("Resolve gate: tl-deliver %s  (approve/skip/fix per finding)",
+                                        [os.path.join(BIN, "tl-deliver.sh"), target.task],
+                                        "delivered %s" % target.task)
+                else:
+                    prompt, argv, ok = ("Review the report: tl-approve %s  (approve / skip / fix)",
+                                        [os.path.join(BIN, "tl-approve.sh"), target.task],
+                                        "recorded your decision on %s" % target.task)
+                if _confirm(win, prompt % target.task):
+                    st["notice"] = _ran(argv, _shell_out(win, argv), ok)
             q = recompute()
 
 

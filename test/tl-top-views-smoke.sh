@@ -19,6 +19,7 @@ trap 'for k in $KIDS; do kill $k 2>/dev/null || true; done; rm -rf "$WORK"' EXIT
 export TL_HOME="$REPO" TL_DATA="$WORK/data" TL_STATE="$WORK/state" TL_LEAD="$WORK/lead"
 export TL_WORKTREES="$WORK/state/wt" TL_BACKLOG="$WORK/data/backlog.md"
 export TL_TOP_INTERVAL=1 TL_FRESH_SECS=0
+export PAGER=cat   # so `p` does not block the pty on an interactive pager
 
 # A grill driver that succeeds normally but FAILS for 'dark-mode', so a shelled command that exits
 # non-zero can be told apart from one that quietly did nothing.
@@ -74,6 +75,19 @@ EOF
   printf '%s\tneeds-decision\n' "$(date +%s)" > "$TL_STATE/tl-oauth.status"
   printf 'question=%s\ndefault=yes\ntimeout=30\n' "$WORKER_Q" > "$TL_DATA/tl-oauth/ask"
 
+  # a finished PLAN: its report IS the deliverable, and the row that says "approve, skip or fix"
+  # is asking about that text. No session -> tl-state reconciles to `done` from the report.
+  mkdir -p "$TL_DATA/tl-docs"
+  cat > "$TL_DATA/tl-docs/report.md" <<'EOF'
+# Plan: rename the widget module
+
+1. Move widget.py to widgets/core.py
+2. Update the three importers
+Risk: the public re-export in __init__.py is the thing that will bite.
+EOF
+  printf 'kind=plan\npname=notes-app\nreport=%s\n' "$TL_DATA/tl-docs/report.md" \
+    > "$TL_STATE/tl-docs.meta"
+
   printf '# questions.md\n\n### what breaks that already works?\nhits: 4   last: 2026-08-14\n_scar:_ the 2024 reindex silently dropped 11k rows\n' > "$TL_LEAD/questions.md"
 }
 
@@ -97,6 +111,11 @@ grep -q '^q: q3|open|' "$TL_DATA/tl-add-search/spec.md" \
 grep -q 'tl-add-search' "$TL_DATA/metrics.tsv" 2>/dev/null \
   || fail "S2: tl-grill's D13 metric did not fire — tl-top bypassed the command path"
 echo "  S2 ok — d answers through the real tl-grill, and the next question is answerable at once"
+
+setup; drive report     || fail "scenario 'report' (see above)"
+grep -q '^approval=approve' "$TL_STATE/tl-docs.meta" \
+  || fail "S5: g on a plan did not reach tl-approve — meta has: $(grep approval "$TL_STATE/tl-docs.meta" || echo none)"
+echo "  S5 ok — a plan's report is readable in the TUI, and g offers the right gate for its kind"
 
 setup; drive grill-ok   || fail "scenario 'grill-ok' (see above)"
 grep -q '^q: q2|open|' "$TL_DATA/tl-csv-export/spec.md" 2>/dev/null \

@@ -54,6 +54,47 @@ case "${1:-}" in
     printf '%s\trejected\t%s\t%s\n' "$(date -u +%Y-%m-%d)" "$("$BIN/tl-spec.sh" get "$id" backlog)" "$reason" \
       >> "$TL_DATA/backlog.decisions"
     tl_log "grill: rejected $id — $reason"; exit 0 ;;
+  propose) # propose SLUG — draft candidate questions for a backlog item into data/proposals/ (#49).
+    # Bootstrap for a thin/empty bank: the LLM proposes questions the owner curates + promotes. Never
+    # writes lead/ — goes through tl-propose's propose-not-write file machinery, with a grill-specific
+    # proposer. Owner disposes (prune the file, then `tl-grill promote SLUG`).
+    slug="${2:?usage: tl-grill propose <backlog-slug>}"
+    [ -f "$BACKLOG" ] || tl_die "no backlog at $BACKLOG"
+    title="$(awk -v s="$slug" 'index($0,"## "s":")==1{t=$0; sub("^## [^:]*: *","",t); print t; exit}' "$BACKLOG")"
+    [ -n "$title" ] || tl_die "backlog item '$slug' not found (want a heading '## $slug: <title>')"
+    bodyf="$(mktemp)"
+    awk -v s="$slug" 'index($0,"## "s":")==1{f=1;next} f&&index($0,"## ")==1{f=0} f{print}' "$BACKLOG" > "$bodyf"
+    TL_PROPOSE_CMD="${TL_GRILL_PROPOSE_CMD:-$TL_HOME/adapters/claude-grill-propose.sh}" \
+    TL_PROP_SOURCE="backlog item '$slug'" \
+      "$BIN/tl-propose.sh" question "$slug" "$bodyf"
+    rm -f "$bodyf"
+    echo "tl: candidates for '$slug' — prune the ones you don't want, then: tl-grill promote $slug"
+    exit 0 ;;
+  promote) # promote SLUG — append the surviving candidates to lead/questions.md, then archive.
+    # Owner-driven (the one write into lead/, and only after the owner pruned the proposal). Proposed
+    # questions enter provisional: hits: 0 and an unproven scar; the junk-drawer defense (D4) prunes
+    # any that never fire (Q8=a).
+    slug="${2:?usage: tl-grill promote <backlog-slug>}"
+    prop="$TL_DATA/proposals/question-$slug.md"
+    [ -f "$prop" ] || tl_die "no proposal for '$slug' at ${prop#"$TL_DATA"/} — run: tl-grill propose $slug"
+    qfile="$TL_LEAD/questions.md"; mkdir -p "$TL_LEAD"
+    n=0
+    # survivors = the h3 question headings the owner left in the file
+    while IFS= read -r q; do
+      [ -n "$q" ] || continue
+      { printf '\n### %s\nhits: 0   last: —\n_scar:_ (proposed — unproven)\n' "$q"; } >> "$qfile"
+      n=$((n+1))
+    done <<EOF2
+$(awk '/^### /{sub(/^### /,"");print}' "$prop")
+EOF2
+    if [ "$n" -eq 0 ]; then
+      echo "tl: nothing to promote for '$slug' — no '### ' candidates left in ${prop#"$TL_DATA"/} (all pruned?)."
+      exit 0
+    fi
+    mv "$prop" "$prop.promoted"
+    tl_log "promoted $n question(s) into ${qfile#"$TL_LEAD"/} (provisional, hits:0) — archived ${prop#"$TL_DATA"/}.promoted"
+    echo "tl: now re-grill against the seeded bank:  tl-run $slug   (or tl-grill $slug)"
+    exit 0 ;;
   show) cat "$("$BIN/tl-spec.sh" path "${2:?}")"; exit 0 ;;
 esac
 

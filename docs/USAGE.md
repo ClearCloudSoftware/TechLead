@@ -184,6 +184,22 @@ Refuse an item outright — the most senior move:
 tl-grill.sh reject tl-add-farewell "Premature — revisit next quarter"
 ```
 
+**Propose-mode (fresh project, empty bank).** The grill applies *your* `lead/questions.md`; on a new
+project that bank is empty, so the grill has nothing to ask and `tl-run` refuses to dispatch (fail
+closed, #49). To bootstrap the bank, let the lead *propose* candidate questions for you to curate:
+
+```sh
+tl-grill.sh propose add-farewell     # -> data/proposals/question-add-farewell.md (candidates, NOT in lead/)
+# open the file, delete the ones you don't want, then:
+tl-grill.sh promote add-farewell     # appends the survivors to lead/questions.md (provisional, hits:0)
+tl-run.sh add-farewell               # re-grills against the now-seeded bank
+```
+
+The LLM only ever *proposes*; nothing enters `lead/` without your `promote`. Promoted questions land
+provisional (`_scar:_ (proposed — unproven)`, `hits: 0`) — the reuse counter earns or prunes them
+(D4). When `TL_GRILL_PROPOSE_CMD` is configured (tl-init wires it for the claude harness), `tl-run`
+auto-drafts the candidates for you at the empty-bank stop; otherwise run `tl-grill propose` yourself.
+
 ### 3. Generate the brief
 
 ```sh

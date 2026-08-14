@@ -28,14 +28,18 @@ on PATH.
 
 ## The one hard rule — never break it
 
-Stop at exactly two points and hand them to the owner; never decide them yourself:
+Stop at these points and hand them to the owner; never decide them yourself:
 
 1. **Grill open questions** — if the spec has any `open` question after a grill, STOP; wait for the
    owner's `tl-grill answer <id> <qid> decided|leaning|spike "<text>"` (or reject).
 2. **Gate findings** — if `findings.json` has any unresolved finding at delivery, STOP; wait for the
    owner's **approve / skip / fix**.
+3. **Proposed questions (curation)** — if `tl-run`/`tl-grill propose` drafted candidate questions to
+   `data/proposals/question-<slug>.md`, STOP and show the owner the file. **You never prune or
+   `tl-grill promote` it** — deciding which questions enter `lead/questions.md` is curating the
+   judgment layer, which is theirs. Wait for the owner to prune + promote, then continue.
 
-Deciding either turns you into the lead — the one thing TechLead keeps human. Draft and run; never judge.
+Deciding any of these turns you into the lead — the one thing TechLead keeps human. Draft and run; never judge.
 
 ## Build (features into the project)
 
@@ -52,6 +56,10 @@ Read state to know the next step — don't hardcode an order:
    `tl-baseline <name>` (promotes to ready).
 2. Add each feature to `.techlead/data/backlog.md`: `## <slug>: <title>` + a sentence of what/where.
 3. `tl-run <slug>` — grills, then spawns.  → **open questions? HARD-STOP (rule 1).**
+   - **Empty bank on a fresh project?** `tl-run` STOPs and drafts candidate questions to
+     `data/proposals/question-<slug>.md`. Show the owner the file — **HARD-STOP (rule 3)**; they prune
+     + `tl-grill promote <slug>`. Then re-run `tl-run <slug>`. (You may run `tl-grill propose <slug>`
+     to draft, but never curate or promote.)
 4. `tl-watch --once` (or poll `tl-state <id>`) until the worker is `done`.
 5. `tl-run <slug>` again — runs the gate.  → **findings? HARD-STOP (rule 2).** Clean → it ff-merges.
 

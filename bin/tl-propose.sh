@@ -19,13 +19,15 @@ out="$dir/${type}-${key}.md"
 [ -f "$out" ] && { echo "tl: proposal already exists, skipping: ${out#"$TL_DATA"/}"; exit 0; }   # idempotent
 
 : "${TL_PROPOSE_CMD:?tl: no proposer — set TL_PROPOSE_CMD (e.g. adapters/claude-propose.sh)}"
-draft="$(TL_PROP_TYPE="$type" TL_PROP_CASE="$casef" $TL_PROPOSE_CMD || true)"
+draft="$(TL_PROP_TYPE="$type" TL_PROP_KEY="$key" TL_PROP_CASE="$casef" $TL_PROPOSE_CMD || true)"
 [ -n "$draft" ] || draft="_(proposer produced nothing — draft the ${type} by hand from the case below)_"
 
 {
   printf '# Candidate %s — for your review (NOT yet in lead/)\n\n' "$type"
+  # source label: callers may set TL_PROP_SOURCE (e.g. grill propose-mode = "backlog item"); else the
+  # loop that drove it — override (#51) or worker escalation (#52).
   printf '> Auto-drafted from a real %s. This is a proposal in `data/proposals/`, derived from YOUR own\n' \
-    "$([ "$type" = rule ] && echo override || echo "worker escalation")"
+    "${TL_PROP_SOURCE:-$([ "$type" = rule ] && echo override || echo "worker escalation")}"
   printf '> decision — edit it and promote it into `lead/` yourself, or delete it. Nothing lands in lead/ without you.\n\n'
   printf '## Triggering case\n\n```\n'; cat "$casef"; printf '\n```\n\n'
   printf '## Drafted candidate (%s)\n\n' "$([ "$type" = rule ] && echo 'lead/principles.md' || echo 'lead/questions.md')"

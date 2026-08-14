@@ -36,10 +36,24 @@ fi
 # ---- GUARD: never dispatch un-grilled work (fail closed, §3.9). Zero questions means the grill had
 # nothing to ask — an empty question bank (lead/questions.md, #49). The whole point of TechLead is the
 # judgment gate; silently briefing+spawning an item nobody grilled skips it. Refuse at the chokepoint.
+# Propose-mode: if a proposer is configured, auto-draft candidate questions for the owner to curate
+# (idempotent — tl-propose skips if the proposal exists, so re-runs don't re-spend) and point at the
+# promote path; else fall back to the plain "seed questions.md" message.
 if [ "$state" != rejected ] && [ "$(total_q)" -eq 0 ]; then
-  echo "tl-run: STOP — '$id' has no grilled questions; refusing to dispatch un-grilled work."
-  echo "  cause: $TL_LEAD/questions.md is empty (#49) — the grill applies your question bank, and there isn't one yet."
-  echo "  fix:   add the questions to ask (one '## qN: <question>' per line) to that file, then re-run: tl-run $slug"
+  prop="$TL_DATA/proposals/question-$slug.md"
+  # Auto-fire only when a proposer is CONFIGURED (tl-init wires TL_GRILL_PROPOSE_CMD for the claude
+  # harness). Opt-in on purpose: the default adapter file always exists, so keying on the file would
+  # auto-spend a model call for every operator, including opencode setups that have no claude.
+  if [ -n "${TL_GRILL_PROPOSE_CMD:-}" ]; then
+    [ -f "$prop" ] || { tl_log "run[$id]: no questions in the bank — drafting candidates (proposer)…"; "$BIN/tl-grill.sh" propose "$slug" >/dev/null 2>&1 || true; }
+    echo "tl-run: STOP — no questions in the bank for '$slug'; I drafted candidates for you to curate."
+    echo "  candidates: $prop"
+    echo "  next: prune the ones you don't want, then:  tl-grill promote $slug  →  tl-run $slug"
+  else
+    echo "tl-run: STOP — '$id' has no grilled questions; refusing to dispatch un-grilled work."
+    echo "  cause: $TL_LEAD/questions.md is empty (#49) — the grill applies your question bank, and there isn't one yet."
+    echo "  fix:   add the questions to ask, then re-run: tl-run $slug  (or: tl-grill propose $slug to draft candidates)"
+  fi
   exit 0
 fi
 

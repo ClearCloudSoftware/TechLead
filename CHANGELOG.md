@@ -23,6 +23,15 @@ use (§4).
 
 ### Added
 
+- **Security review axis** (`tl-security.sh` + `adapters/claude-security.sh`) — a third parallel
+  reviewer over a finished change's diff, scoped to vulnerabilities only. Owner decision 2026-08-18:
+  **security blocks, code stays advisory** — the gate folds its findings into `findings.json` like
+  the Spec axis (rule-ids `security-vulnerability`, and `security-unrunnable` when the judge crashes
+  or emits unusable output — fail closed, a dead reviewer never silently passes), while the
+  Standards axis stays draft-only (#53 q2 holds). The `review` kind's draft gains a Security
+  section; `tl-init` wires `TL_SECURITY_CMD` for the claude harness; unset skips the axis like
+  `TL_SPECDIFF_CMD` (`test/security-smoke.sh`).
+
 - **`tl-scaffold-context`** — drafts a project's `AGENTS.md` (layout, conventions, danger zones) and
   `CONTEXT.md` (domain glossary) as real files (draft-then-approve: never commits, never overwrites),
   closing the gap where the onboarding survey (a plan task) could only *describe* them in a report.

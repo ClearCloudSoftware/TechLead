@@ -349,6 +349,11 @@ tl-gate.sh    t2        # runs tests vs baseline, checks scope + danger → data
 tl-deliver.sh t2        # self-edit guard + gate, then ff-merge (or open a PR); refuses on open findings
 ```
 
+When judges are configured the gate also folds in the **Spec axis** (`TL_SPECDIFF_CMD` — the diff vs
+the spec's decided answers) and the **Security axis** (`TL_SECURITY_CMD` — vulnerabilities in the
+diff; a crashed judge blocks as `security-unrunnable`, never a silent pass). The Standards axis is
+advisory by decision and never reaches the gate — it renders in the `review` kind's draft only.
+
 Findings are structured and default to `ask-user` (fail-closed). `tl-deliver` will not merge while
 any finding is unresolved — the gate is a removed capability, not an instruction.
 
@@ -442,6 +447,7 @@ TL_APPROVE=yes bin/tl-deliver.sh af1           # gate → ff-merge onto main
 | `TL_DATA` / `TL_STATE` / `TL_LEAD` / `TL_WORKTREES` | Override storage locations (default: the nearest `<project>/.techlead/`, else `TL_HOME`). |
 | `TL_WORKER_CMD` | Worker adapter (real agent or demo). |
 | `TL_GRILL_CMD` | Grill inference driver. |
+| `TL_SECURITY_CMD` | Security review axis (blocks at the gate; unset = axis skipped). |
 | `TL_OPENCODE_MODEL` | Model for the opencode adapters; must support tools. **Local pick: `ollama/qwen3-coder:30b`.** |
 | `TL_BACKLOG` | Backlog path (default `<project>/.techlead/data/backlog.md`). |
 | `TL_APPROVE=yes` | Non-interactive approval (tests/automation); `TL_RESOLVE` sets the finding resolution. |

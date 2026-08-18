@@ -10,11 +10,13 @@ id="${1:?usage: tl-review <change-id>}"
 [ -f "$("$BIN/tl-spec.sh" path "$id")" ] || tl_die "no spec for $id — review needs a grilled change"
 draft="$TL_DATA/$id/review-draft.md"; mkdir -p "$TL_DATA/$id"
 
-# run the two axes apart and in parallel (§2.2) — nits must not drown intent
+# run the axes apart and in parallel (§2.2) — nits must not drown intent
 "$BIN/tl-specdiff.sh"  run "$id" 2>/dev/null &  spec_pid=$!
 "$BIN/tl-standards.sh" run "$id" 2>/dev/null &  std_pid=$!
+"$BIN/tl-security.sh"  run "$id" 2>/dev/null &  sec_pid=$!
 wait "$spec_pid" 2>/dev/null || true
 wait "$std_pid"  2>/dev/null || true
+wait "$sec_pid"  2>/dev/null || true
 
 {
   printf '# Review draft — %s\n\n' "$id"
@@ -23,6 +25,8 @@ wait "$std_pid"  2>/dev/null || true
   "$BIN/tl-specdiff.sh"  report "$id" 2>/dev/null || echo "(spec axis did not run — is TL_SPECDIFF_CMD set?)"
   printf '\n## Standards (borrowed craft — advisory)\n\n'
   "$BIN/tl-standards.sh" report "$id" 2>/dev/null || echo "(standards axis did not run — is TL_STANDARDS_CMD set?)"
+  printf '\n## Security (vulnerabilities — blocking at the gate)\n\n'
+  "$BIN/tl-security.sh" report "$id" 2>/dev/null || echo "(security axis did not run — is TL_SECURITY_CMD set?)"
 } > "$draft"
 
 echo "tl: review draft -> $draft  (draft only — nothing posted)"

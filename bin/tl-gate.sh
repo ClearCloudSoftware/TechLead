@@ -63,6 +63,14 @@ if [ -n "${TL_SPECDIFF_CMD:-}" ]; then
   tl_spin "gate: spec-axis judge…" "$BIN/tl-specdiff.sh" run "$id" || true
   "$BIN/tl-specdiff.sh" findings "$id" >> "$tmp" || true
 fi
+# Security axis (owner decision 2026-08-18): security BLOCKS, standards stays advisory (#53 q2 holds).
+# Same "two homes" shape as the Spec axis above; a judge crash folds in as security-unrunnable
+# (fail closed inside tl-security.sh — a dead reviewer must block, never silently pass).
+# tl: runs only when a judge is configured (TL_SECURITY_CMD) — same bootstrap ceiling as the spec judge.
+if [ -n "${TL_SECURITY_CMD:-}" ]; then
+  tl_spin "gate: security axis…" "$BIN/tl-security.sh" run "$id" || true
+  "$BIN/tl-security.sh" findings "$id" >> "$tmp" || true
+fi
 # classify each finding via the rubric router (#55): rule -> class + class_source. Unknown -> ask-user.
 tmp2="$(mktemp)"; : > "$tmp2"
 while IFS="$TAB" read -r rule detail path; do

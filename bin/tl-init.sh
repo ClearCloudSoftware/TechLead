@@ -18,9 +18,10 @@ case "$harness" in
             propose="$TL_HOME/adapters/claude-grill-propose.sh"; scaffold="$TL_HOME/adapters/claude-scaffold-test.sh"
             sctx="$TL_HOME/adapters/claude-scaffold-context.sh"; kick="$TL_HOME/adapters/claude-kickoff.sh"
             specdiff="$TL_HOME/adapters/claude-specdiff.sh"; standards="$TL_HOME/adapters/claude-standards.sh"
+            security="$TL_HOME/adapters/claude-security.sh"
             answer="$TL_HOME/adapters/claude-answer.sh"; model="";;
   opencode) worker="$TL_HOME/adapters/opencode-worker.sh"; grill="$TL_HOME/adapters/opencode-grill.sh"
-            propose=""; scaffold=""; sctx=""; kick=""; specdiff=""; standards=""; answer=""   # no opencode adapters yet → those axes fall back
+            propose=""; scaffold=""; sctx=""; kick=""; specdiff=""; standards=""; security=""; answer=""   # no opencode adapters yet → those axes fall back
             model="$(tl_ask MODEL "opencode model (must support tools)" "ollama/qwen3-coder:30b")";;
   *) tl_die "unknown harness: $harness (want claude|opencode)";;
 esac
@@ -44,6 +45,8 @@ mkdir -p "$(dirname "$TL_CONFIG")"
   # skips it. Wire all three review/answer judges so the gate and the review/answer kinds work by default.
   [ -n "$specdiff" ] && printf 'export TL_SPECDIFF_CMD="${TL_SPECDIFF_CMD:-%s}"\n' "$specdiff"
   [ -n "$standards" ] && printf 'export TL_STANDARDS_CMD="${TL_STANDARDS_CMD:-%s}"\n' "$standards"
+  # Security axis blocks at the gate (owner decision 2026-08-18); unset = silently skipped, like specdiff.
+  [ -n "$security" ] && printf 'export TL_SECURITY_CMD="${TL_SECURITY_CMD:-%s}"\n' "$security"
   [ -n "$answer" ] && printf 'export TL_ANSWER_CMD="${TL_ANSWER_CMD:-%s}"\n' "$answer"
   [ -n "$model" ] && printf 'export TL_OPENCODE_MODEL="${TL_OPENCODE_MODEL:-%s}"\n' "$model"
 } > "$TL_CONFIG"
